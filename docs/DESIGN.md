@@ -119,11 +119,40 @@ Target for the Pascal implementation:
 
 | level | block | ratio (text corpus) | compress | decompress |
 |---|---|---|---|---|
-| 1 (fast) | 1 MB | ~19 % | 30–50 MB/s | 250+ MB/s |
-| 5 (default) | 8 MB | ~17.5 % | 20–30 MB/s | 200+ MB/s |
-| 9 (max) | 16 MB | ~16.9 % | 10–20 MB/s | 200+ MB/s |
+| 1 (fast) | 1 MB | ~19 % | 8–12 MB/s | 250+ MB/s |
+| 5 (default) | 8 MB | ~17.5 % | 6–9 MB/s | 200+ MB/s |
+| 9 (max) | 16 MB | ~16.9 % | 5–7 MB/s | 200+ MB/s |
 
-These are targets, not measurements; M1 establishes the real numbers.
+These are targets, not measurements; M1 establishes the real numbers, and the
+first SA-IS measurement has already moved them down.
+
+### SA-IS in Pascal: first measurement
+
+`src/tvct.sais.pas` implements the paper's compact variant over Int32 symbols,
+with the sentinel. Correctness is checked against a naive sort on 4001 random
+strings and with an O(n) order-and-permutation check on real text blocks.
+
+Throughput on the same machine, single thread:
+
+| block | tovyCT SA-IS (Pascal) | libsais (C, reference) |
+|---|---|---|
+| 1 MB | 8.6 MB/s | 30.1 MB/s |
+| 4 MB | 7.8 MB/s | 32.1 MB/s |
+| 8 MB | 6.4 MB/s | 24.9 MB/s |
+| 16 MB | 5.6 MB/s | 20.3 MB/s |
+
+The gap is about 4x. libsais is the state of the art and is what `bz2-ng` links.
+The Int32 work array costs 4 bytes per input byte; a byte-level rewrite (8-bit
+symbols, fewer passes, prefetching) is the next step and should recover a good
+part of the gap.
+
+The reference row also sets the ceiling honestly: on this CPU even libsais builds
+a 16 MB suffix array at 20 MB/s, so a BWT codec in C would compress at roughly
+15 MB/s here. The 66 MB/s figure `bz2-ng` reports comes from newer CPUs.
+
+This means the compression-speed targets above are too optimistic for this
+machine and are being re-baselined in M1. Decompression is unaffected: it does
+not build suffix arrays.
 
 ### Assembly kernels
 

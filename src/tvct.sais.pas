@@ -36,6 +36,12 @@ procedure SaisBuildSA(const T: PByte; N: SizeInt; SA: PInt32);
 { Vendored libsais 2.10.4, Apache-2.0. See third_party/libsais/README.md. }
 function tvct_libsais(T: PByte; SA: PInt32; n: Int32; fs: Int32;
   freq: PInt32): Int32; cdecl; external name 'libsais';
+{ BWT + auxiliary indexes in one pass: I[0] is the primary index and I[j+1] is
+  the LF-chain row of output position (j+1)*r - 1, which is exactly what the
+  decoder's chunk walk needs. Returns 0 on success. }
+function libsais_bwt_aux(const T: PByte; U: PByte; A: PInt32; n, fs: Int32;
+  freq: PInt32; r: Int32; I: PInt32): Int32; cdecl;
+  external name 'libsais_bwt_aux';
 {$ENDIF}
 
 implementation

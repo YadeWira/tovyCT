@@ -206,10 +206,18 @@ Single mode: BWT + QLFC, 85 MB text corpus, one thread.
 
 | blocks | ratio | compress | decompress |
 |---|---|---|---|
-| 8 MB, one thread | 17.46 % | 14.5 MB/s | 30.4 MB/s |
-| 8 MB, `-T 8` | 17.46 % | 53.9 MB/s | 72.5 MB/s |
-| 8 MB, `-T 16` | 17.46 % | 78.5 MB/s | 103.8 MB/s |
+| 8 MB, one thread | 17.46 % | 16.4 MB/s | 30.4 MB/s |
+| 8 MB, `-T 8` | 17.46 % | 62.0 MB/s | 71.9 MB/s |
+| 8 MB, `-T 16` | 17.46 % | 72.4 MB/s | 97.3 MB/s |
 | 16 MB, one thread | 17.21 % | 13.1 MB/s | 24.0 MB/s |
+
+Against bsc itself on the same corpus and block size: 17.33 % at 17.5/29.5 on
+one thread. The single-thread gap is about 1 % of size and 7 % of compression
+speed; the parallel path is 3.5 to 5 times faster than bsc's CLI, which in this
+build does not scale. The encoder gets the BWT, the primary index and the sample
+rows from one `libsais_bwt_aux` call, which removed the separate SA pass and the
+inverse-suffix-array scan; the BWT inverse stays in this project's kernel, which
+measures 93 MB/s against libsais's 74.
 
 Blocks are independent, so the parallel path is a pool of workers over one chunk
 of blocks and a sequential writer; the output is byte-identical to the

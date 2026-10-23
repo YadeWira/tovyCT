@@ -71,9 +71,10 @@ byte-identical output with the blocks compressed in parallel:
 
 | | ratio | compress | decompress |
 |---|---|---|---|
-| **tovyCT, one thread** | **17.46 %** | **14.5 MB/s** | **30.4 MB/s** |
-| **tovyCT, `-T 8`** | **17.46 %** | **53.9 MB/s** | **72.5 MB/s** |
-| **tovyCT, `-T 16`** | **17.46 %** | **78.5 MB/s** | **103.8 MB/s** |
+| **tovyCT, one thread** | **17.46 %** | **16.4 MB/s** | **30.4 MB/s** |
+| **tovyCT, `-T 8`** | **17.46 %** | **62.0 MB/s** | **71.9 MB/s** |
+| **tovyCT, `-T 16`** | **17.46 %** | **72.4 MB/s** | **97.3 MB/s** |
+| bsc 3.3.12, one thread | 17.33 % | 17.5 MB/s | 29.5 MB/s |
 | bzip3 | 16.90 % | 7 MB/s | 9 MB/s |
 | xz -6 | 20.19 % | 6 MB/s | ~80 MB/s |
 | bzip2 -9 | 20.78 % | 11 MB/s | 35 MB/s |

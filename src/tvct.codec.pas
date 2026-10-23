@@ -198,9 +198,19 @@ begin
   GetMem(SA, (N + 1) * SizeOf(Int32));
   GetMem(BwtBuf, N + 1);
   try
+{$IFDEF TVCT_LIBSAIS}
+    { One pass gives the BWT, the primary index and the sample rows. }
+    if libsais_bwt_aux(Src, BwtBuf, SA, N, 0, nil, SAMPLE_RATE, Samples) < 0 then
+      Exit;
+    Primary := Samples[0];
+    NSamples := (N + SAMPLE_RATE - 1) div SAMPLE_RATE;
+    Move(Samples[1], Samples[0], (NSamples - 1) * SizeOf(Int32));
+    Samples[NSamples - 1] := 0;
+{$ELSE}
     SaisBuildSA(Src, N, SA);
     BwtForward(Src, N, SA, BwtBuf, Primary);
     BuildSamples(SA, N, Samples, NSamples);
+{$ENDIF}
 
     if DstCap < N then
       Exit;

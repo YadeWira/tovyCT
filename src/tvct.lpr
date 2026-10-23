@@ -23,7 +23,7 @@ var
 procedure Usage;
 begin
   WriteLn('usage:');
-  WriteLn('  tvct c <input> [output] [-b MB] [--cm]   compress');
+  WriteLn('  tvct c <input> [output] [-b MB]   compress');
   WriteLn('  tvct d <input> [output]           decompress');
   WriteLn('  tvct t <input>                    verify');
   WriteLn('  tvct i <input>                    show header');
@@ -204,9 +204,7 @@ begin
   i := 3;
   while i <= ParamCount do
   begin
-    if (ParamStr(i) = '--cm') or (ParamStr(i) = '-9') then
-      CodecUseCM := True
-    else if ParamStr(i) = '-b' then
+    if ParamStr(i) = '-b' then
     begin
       Inc(i);
       MB := StrToIntDef(ParamStr(i), 8);

@@ -28,13 +28,22 @@ for arg in "$@"; do
   esac
 done
 
-mkdir -p "$OUT/tests" "$OUT/libsais" "$OUT/lib"
+mkdir -p "$OUT/tests" "$OUT/libsais" "$OUT/lib" "$OUT/bsc"
+
+# libbsc coder (Apache-2.0), the entropy backend.
+BSC="$(pwd)/third_party/libbsc/src"
+g++ $CFLAGS -c "$BSC/coder/coder.cpp" -o "$OUT/bsc/coder.o"
+g++ $CFLAGS -c "$BSC/coder/qlfc/qlfc.cpp" -o "$OUT/bsc/qlfc.o"
+g++ $CFLAGS -c "$BSC/coder/qlfc/qlfc_model.cpp" -o "$OUT/bsc/qlfc_model.o"
+g++ $CFLAGS -c "$BSC/platform/platform.cpp" -o "$OUT/bsc/platform.o"
+g++ $CFLAGS -c "$BSC/adler32/adler32.cpp" -o "$OUT/bsc/adler32.o"
+ar rcs "$OUT/bsc/libbsc.a" "$OUT/bsc/coder.o" "$OUT/bsc/qlfc.o" "$OUT/bsc/qlfc_model.o" "$OUT/bsc/platform.o" "$OUT/bsc/adler32.o"
+LIBS="$LIBS -Fl$(pwd)/$OUT/bsc"
 
 # C kernels are always built: they are part of the decoder.
 CC=${CC:-cc}
 "$CC" $CFLAGS -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
-"$CC" $CFLAGS -c src/c/tvct_cm.c -o "$OUT/lib/tvct_cm.o"
-ar rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o" "$OUT/lib/tvct_cm.o"
+ar rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o"
 LIBS="$LIBS -Fl$(pwd)/$OUT/lib"
 
 if [ -n "$USE_LIBSAIS" ]; then

@@ -202,81 +202,33 @@ That plan is what the assembly kernels will implement.
 
 ### M1 end-to-end
 
-The format, the CLI and the whole pipeline are working; 85 MB text corpus,
-16 MB blocks, one thread:
-
-| pipeline | ratio | compress | decompress |
-|---|---|---|---|
-| BWT + MTF/RLE + 3-context rANS | 20.36 % | 11.9 MB/s | 9.9 MB/s |
-
-Measured alternatives on the same file: bzip3 16.90 %, xz -6 20.19 %, bzip2 -9
-20.78 %, zstd -19 20.18 %, brotli -9 22.02 %.
-
-Two findings from this phase:
-
-- **LZP with a short minimum match hurts.** At 4 bytes it costs 12 % of the final
-  size: it removes the repeats the BWT would have clustered. bzip3 uses aminimum
-  match of 40, which only collapses long redundant data. Our LZP is implemented
-  and off by default until it is re-tuned to that shape.
-- **bzip3's ratio comes from the entropy coder, not from MTF.** Reading its
-  source: it applies RLE, then LZP with a 40-byte minimum, then BWT, and codes
-  bytes with a context-mixing arithmetic coder (order-1 and order-2 bit models,
-  mixed and passed through an APM). MTF + rANS is the bzip2 architecture, and it
-  measures at bzip2-plus-a-little, exactly as expected.
-
-Decompression was the next problem: the inverse BWT is a dependent chain of
-random reads, one memory latency per byte.
-
-The fix is in `src/c/tvct_kernels.c`. The encoder computes the inverse suffix
-array once and stores, for every 4096-byte chunk of the output, the LF-chain row
-of that chunk's last position. That is 0.1 % of the block, and with it the
-decoder starts eight chains at known rows and walks them interleaved, so the
-out-of-order engine keeps eight loads in flight instead of one. The same file
-carries the rANS and MTF/RLE decoders.
-
-Measured, 85 MB text corpus, one thread:
+Single mode: BWT + QLFC, 85 MB text corpus, one thread.
 
 | blocks | ratio | compress | decompress |
 |---|---|---|---|
-| 8 MB | 20.48 % | 14.6 MB/s | 42.4 MB/s |
-| 4 MB | 20.77 % | 16.8 MB/s | 50.2 MB/s |
-| 2 MB | 21.25 % | 16.1 MB/s | 51.6 MB/s |
+| 8 MB | 17.46 % | 14.6 MB/s | 27.1 MB/s |
+| 16 MB | 17.21 % | 13.1 MB/s | 24.0 MB/s |
 
-Decode stage times at 8 MB blocks: inverse BWT 0.96 s, MTF/RLE 0.40 s, rANS
-0.31 s, file write 0.28 s for the whole 85 MB.
+Reference on the same corpus: bzip3 16.90 % at 7/9, bsc 17.06 % at 13.9/27,
+xz -6 20.19 % at 6/~80, bzip2 -9 20.78 % at 11/35.
 
-### Context mixing: method 2
+The entropy stage went through three designs, each measured:
 
-MTF + rANS is the bzip2 architecture and lands at bzip2 plus a little, as the
-measurements showed. The coder that makes bzip3 small is context mixing on the
-BWT bytes: three bit models (order-0, previous byte, the byte before that),
-mixed with fixed weights and refined by an APM stage indexed by the bit-tree
-context and a run flag.
+1. **MTF + static rANS** (the bzip2 architecture with a better alphabet coder):
+   20.48 % at 13.9/41.6. Fast, but 15 % behind the field.
+2. **Context mixing on the BWT bytes** (order-1/2 bit models, mixed, with an
+   APM): 17.23 % at 7.8/10.7. Matched bzip3's ratio, but half its speed.
+3. **QLFC** (libbsc's coder, Apache-2.0): 17.46 % at 14.6/27.1. Delivers the
+   ratio of the context-mixing coder at twice its speed.
 
-`src/c/tvct_cm.c` implements it as a second block method, selected with `--cm`.
-It is the same model, written from the published description (bzip3 is LGPL and
-none of its code is used).
+QLFC does its own RLE, MTF and context-conditioned arithmetic coding over the BWT
+output. Its advantage over the static rANS is not LZP — libbsc's LZP only shrinks
+this corpus by 0.06 % — it is the coder itself. That measurement is what settled
+the design: entropy modelling, not preprocessing.
 
-| blocks | ratio | compress | decompress |
-|---|---|---|---|
-| 16 MB, CM | 17.23 % | 7.8 MB/s | 10.7 MB/s |
-| 8 MB, CM | 17.39 % | 8.0 MB/s | 10.2 MB/s |
-| 4 MB, CM | 17.88 % | 8.2 MB/s | 10.6 MB/s |
-| 8 MB, MTF + rANS | 20.48 % | 13.9 MB/s | 41.6 MB/s |
-
-bzip3 on the same corpus: 16.90 % at 7 MB/s compress and 9 MB/s decompress. So
-the CM mode is within 2 % of its ratio and faster in both directions; the rANS
-mode is 19 % larger and four times faster to decode.
-
-Two tunings were measured and rejected. Dropping the APM stage makes the CM 35 %
-faster but only 19.91 % against 19.54 % on a 16 MB block, which is dominated by
-the rANS mode; dropping the order-0 model costs 0.6 points for 12 % speed. The
-full model stays.
-
-The remaining cost is the bit-serial arithmetic coder: 36 cycles per bit, about
-11 MB/s. Beyond that the BWT decode is no longer the limit; the next lever for
-the CM mode would be a parallel or table-driven binary coder, not more BWT work.
-
+Decoding runs in C kernels. The encoder stores the LF-chain row of every
+4096-byte output chunk, taken from the inverse suffix array (0.1 % of the block),
+so the decoder walks eight independent chains instead of one serial one.
 ## 4. What is still open
 
 - **SA-IS in Pascal at speed.** The one real risk. A 16 MB block needs a

@@ -40,11 +40,11 @@ uses
   Classes, SysUtils, tvct.sais, tvct.bwt, tvct.kernels, tvct.bsc, tvct.crc;
 
 const
-  CODEC_VERSION = 2;
+  CODEC_VERSION = 3;
   DEFAULT_BLOCK_LOG = 23;
   METHOD_RAW = 0;
   METHOD_BWT = 1;
-  CODEC_HEADER_SIZE = 8;
+  CODEC_HEADER_SIZE = 16;   { magic 4, version, block log, flags, reserved, total u64 }
   BLOCK_HEADER_SIZE = 20;   { orig, payload, method, crc, payload crc }
   BWT_HEADER_EXTRA = 16;
   SAMPLE_RATE = 4096;
@@ -150,6 +150,64 @@ begin
   P[1] := Byte(V shr 8);
   P[2] := Byte(V shr 16);
   P[3] := Byte(V shr 24);
+end;
+
+procedure PutU64(P: PByte; V: Int64); inline;
+var
+  U: QWord;
+  i: Int32;
+begin
+  U := QWord(V);
+  for i := 0 to 7 do
+    P[i] := Byte(U shr (8 * i));
+end;
+
+function GetU64(P: PByte): Int64; inline;
+var
+  U: QWord;
+  i: Int32;
+begin
+  U := 0;
+  for i := 7 downto 0 do
+    U := (U shl 8) or QWord(P[i]);
+  Result := Int64(U);
+end;
+
+procedure ReadExact(S: TStream; P: PByte; N: Int32); forward;
+
+{ The stream header: magic, version, block log, flags, reserved and the total
+  uncompressed size (0 when the source size was unknown). }
+procedure WriteHeader(Dst: TStream; BlockLog: Int32; Total: Int64; Known: Boolean);
+var
+  Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
+begin
+  Hdr[0] := Ord('T'); Hdr[1] := Ord('V'); Hdr[2] := Ord('C'); Hdr[3] := Ord('T');
+  Hdr[4] := CODEC_VERSION;
+  Hdr[5] := Byte(BlockLog);
+  Hdr[6] := Ord(Known);
+  Hdr[7] := 0;
+  PutU64(@Hdr[8], Total);
+  Dst.WriteBuffer(Hdr[0], CODEC_HEADER_SIZE);
+end;
+
+function ReadHeader(Src: TStream; out BlockLog: Int32; out Total: Int64;
+  out Known: Boolean): Boolean;
+var
+  Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
+begin
+  Result := False;
+  if Src.Size - Src.Position < CODEC_HEADER_SIZE then
+    Exit;
+  ReadExact(Src, @Hdr[0], CODEC_HEADER_SIZE);
+  if (Hdr[0] <> Ord('T')) or (Hdr[1] <> Ord('V')) or (Hdr[2] <> Ord('C')) or
+     (Hdr[3] <> Ord('T')) or (Hdr[4] <> CODEC_VERSION) then
+    Exit;
+  BlockLog := Hdr[5];
+  Known := (Hdr[6] and 1) <> 0;
+  Total := GetU64(@Hdr[8]);
+  if Known and (Total < 0) then
+    Exit;
+  Result := (BlockLog >= 16) and (BlockLog <= 27);
 end;
 
 function GetU32(P: PByte): LongWord; inline;
@@ -277,6 +335,8 @@ var
   BlockSize, N, PayloadLen, BwtSize, Primary, NSamples, i: Int32;
   Crc: LongWord;
   Raw: Boolean;
+  Total: Int64;
+  Known: Boolean;
 begin
   Result := False;
   Stats.InBytes := 0;
@@ -289,12 +349,15 @@ begin
     Exit;
   BlockSize := 1 shl BlockLog;
 
-  Hdr[0] := Ord('T'); Hdr[1] := Ord('V'); Hdr[2] := Ord('C'); Hdr[3] := Ord('T');
-  Hdr[4] := CODEC_VERSION;
-  Hdr[5] := Byte(BlockLog);
-  Hdr[6] := 0;
-  Hdr[7] := 0;
-  Dst.WriteBuffer(Hdr[0], CODEC_HEADER_SIZE);
+  Known := False;
+  Total := 0;
+  try
+    Total := Int64(Src.Size) - Int64(Src.Position);
+    Known := Total >= 0;
+  except
+    Known := False;
+  end;
+  WriteHeader(Dst, BlockLog, Total, Known);
   Stats.OutBytes := CODEC_HEADER_SIZE;
 
   SrcBuf := GetMem(BlockSize);
@@ -360,8 +423,10 @@ var
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
   Buf, OutBuf, Samples: PByte;
   BlockSize, OrigSize, PayloadLen, Method, BwtSize, Primary, NSamples,
-    i, MaxSamples: Int32;
+    i, MaxSamples, BlockLog: Int32;
   Crc, PayloadCrc: LongWord;
+  Total, Decoded: Int64;
+  Known: Boolean;
 begin
   Result := False;
   Stats.InBytes := 0;
@@ -370,13 +435,10 @@ begin
   Stats.RawBlocks := 0;
   EnsureBsc;
 
-  ReadExact(Src, @Hdr[0], CODEC_HEADER_SIZE);
-  if (Hdr[0] <> Ord('T')) or (Hdr[1] <> Ord('V')) or (Hdr[2] <> Ord('C')) or
-     (Hdr[3] <> Ord('T')) or (Hdr[4] <> CODEC_VERSION) then
+  if not ReadHeader(Src, BlockLog, Total, Known) then
     Exit;
-  BlockSize := 1 shl Hdr[5];
-  if (BlockSize < 1 shl 16) or (BlockSize > 1 shl 27) then
-    Exit;
+  BlockSize := 1 shl BlockLog;
+  Decoded := 0;
 
   Buf := GetMem(BlockSize + 4096);
   OutBuf := GetMem(BlockSize);
@@ -429,7 +491,12 @@ begin
       Inc(Stats.Blocks);
       Inc(Stats.OutBytes, OrigSize);
       Inc(Stats.InBytes, BLOCK_HEADER_SIZE + PayloadLen);
+      Inc(Decoded, OrigSize);
+      if Known and (Decoded > Total) then
+        Exit;
     end;
+    if Known and (Decoded <> Total) then
+      Exit;
     Result := True;
   finally
     FreeMem(Samples);
@@ -447,6 +514,8 @@ var
   Jobs: array of TBlockJob;
   Workers: array of TBlockWorker;
   BlockSize, count, i, MaxSamples: Int32;
+  Total: Int64;
+  Known: Boolean;
 begin
   Result := False;
   Stats.InBytes := 0;
@@ -461,12 +530,15 @@ begin
   BlockSize := 1 shl BlockLog;
   MaxSamples := BlockSize div SAMPLE_RATE + 2;
 
-  Hdr[0] := Ord('T'); Hdr[1] := Ord('V'); Hdr[2] := Ord('C'); Hdr[3] := Ord('T');
-  Hdr[4] := CODEC_VERSION;
-  Hdr[5] := Byte(BlockLog);
-  Hdr[6] := 0;
-  Hdr[7] := 0;
-  Dst.WriteBuffer(Hdr[0], CODEC_HEADER_SIZE);
+  Known := False;
+  Total := 0;
+  try
+    Total := Int64(Src.Size) - Int64(Src.Position);
+    Known := Total >= 0;
+  except
+    Known := False;
+  end;
+  WriteHeader(Dst, BlockLog, Total, Known);
   Stats.OutBytes := CODEC_HEADER_SIZE;
 
   SetLength(Jobs, Threads);
@@ -556,8 +628,10 @@ var
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
   Jobs: array of TBlockJob;
   Workers: array of TBlockWorker;
-  BlockSize, count, i, Method, MaxSamples: Int32;
+  BlockSize, count, i, Method, MaxSamples, BlockLog: Int32;
   PayloadCrc: LongWord;
+  Total, Decoded: Int64;
+  Known: Boolean;
 begin
   Result := False;
   Stats.InBytes := 0;
@@ -568,13 +642,10 @@ begin
     Exit(DecompressStream(Src, Dst, Stats));
   EnsureBsc;
 
-  ReadExact(Src, @Hdr[0], CODEC_HEADER_SIZE);
-  if (Hdr[0] <> Ord('T')) or (Hdr[1] <> Ord('V')) or (Hdr[2] <> Ord('C')) or
-     (Hdr[3] <> Ord('T')) or (Hdr[4] <> CODEC_VERSION) then
+  if not ReadHeader(Src, BlockLog, Total, Known) then
     Exit;
-  BlockSize := 1 shl Hdr[5];
-  if (BlockSize < 1 shl 16) or (BlockSize > 1 shl 27) then
-    Exit;
+  BlockSize := 1 shl BlockLog;
+  Decoded := 0;
   MaxSamples := BlockSize div SAMPLE_RATE + 2;
 
   SetLength(Jobs, Threads);
@@ -651,6 +722,9 @@ begin
           Exit;
         Dst.WriteBuffer(Jobs[i].OutBuf[0], Jobs[i].N);
         Inc(Stats.OutBytes, Jobs[i].N);
+        Inc(Decoded, Jobs[i].N);
+        if Known and (Decoded > Total) then
+          Exit;
         if Jobs[i].Raw then
         begin
           Inc(Stats.InBytes, BLOCK_HEADER_SIZE + Jobs[i].N);
@@ -662,6 +736,8 @@ begin
         Inc(Stats.Blocks);
       end;
     until False;
+    if Known and (Decoded <> Total) then
+      Exit;
     Result := True;
   finally
     for i := 0 to Threads - 1 do
@@ -677,15 +753,17 @@ function StreamDataSize(Src: TStream): Int64;
 var
   Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
-  OrigSize, PayloadLen, Method, NSamples: Int32;
+  OrigSize, PayloadLen, Method, NSamples, BlockLog: Int32;
+  Total: Int64;
+  Known: Boolean;
 begin
   Result := -1;
   if Src.Size - Src.Position < CODEC_HEADER_SIZE then
     Exit;
-  ReadExact(Src, @Hdr[0], CODEC_HEADER_SIZE);
-  if (Hdr[0] <> Ord('T')) or (Hdr[1] <> Ord('V')) or (Hdr[2] <> Ord('C')) or
-     (Hdr[3] <> Ord('T')) or (Hdr[4] <> CODEC_VERSION) then
+  if not ReadHeader(Src, BlockLog, Total, Known) then
     Exit;
+  if Known then
+    Exit(Total);
   Result := 0;
   while Src.Position + BLOCK_HEADER_SIZE <= Src.Size do
   begin

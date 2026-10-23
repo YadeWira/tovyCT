@@ -177,6 +177,8 @@ var
   F: TFileStream;
   Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
   Size: Int64;
+  U: QWord;
+  i: Int32;
 begin
   F := TFileStream.Create(InPath, fmOpenRead or fmShareDenyWrite);
   try
@@ -195,6 +197,13 @@ begin
     end;
     WriteLn('format:    tovyCT v', Hdr[4]);
     WriteLn('block:     ', (1 shl Hdr[5]) shr 20, ' MiB');
+    if (Hdr[6] and 1) <> 0 then
+    begin
+      U := 0;
+      for i := 15 downto 8 do
+        U := (U shl 8) or QWord(Hdr[i]);
+      WriteLn('original:  ', HumanBytes(Int64(U)));
+    end;
     WriteLn('file size: ', HumanBytes(Size));
   finally
     F.Free;

@@ -121,7 +121,11 @@ begin
   Result := -1;
   S := TBufferStream.Create(src, src_size, True, src_size);
   try
-    Result := StreamDataSize(S);
+    try
+      Result := StreamDataSize(S);
+    except
+      Result := -1;
+    end;
   finally
     S.Free;
   end;

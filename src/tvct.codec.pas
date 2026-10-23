@@ -40,12 +40,12 @@ uses
   Classes, SysUtils, tvct.sais, tvct.bwt, tvct.kernels, tvct.bsc, tvct.crc;
 
 const
-  CODEC_VERSION = 1;
+  CODEC_VERSION = 2;
   DEFAULT_BLOCK_LOG = 23;
   METHOD_RAW = 0;
   METHOD_BWT = 1;
   CODEC_HEADER_SIZE = 8;
-  BLOCK_HEADER_SIZE = 16;
+  BLOCK_HEADER_SIZE = 20;   { orig, payload, method, crc, payload crc }
   BWT_HEADER_EXTRA = 16;
   SAMPLE_RATE = 4096;
 
@@ -233,17 +233,28 @@ function DecompressBlock(const Payload: PByte; PayloadLen, OrigSize: Int32;
   Dst: PByte): Boolean;
 var
   BwtBuf: PByte;
-  R: Int32;
+  R, k: Int32;
 begin
   Result := False;
   if (BwtSize <= 0) or (BwtSize > OrigSize) then
     Exit;
   if NSamples <> (BwtSize + SAMPLE_RATE - 1) div SAMPLE_RATE then
     Exit;
+  { Everything that indexes the BWT or the LF table must be in range before any
+    buffer is touched: this is the only place a corrupt stream can get through. }
+  if (Primary < 0) or (Primary > BwtSize) then
+    Exit;
+  for k := 0 to NSamples - 1 do
+    if (Samples[k] < 0) or (Samples[k] > BwtSize) then
+      Exit;
 
   GetMem(BwtBuf, BwtSize + 1);
   try
+    if GetEnvironmentVariable('TVCT_DEBUG') <> '' then WriteLn(StdErr, 'dbg: bsc decode start');
+    bsc_qlfc_output_limit := BwtSize;
     R := bsc_coder_decompress(Payload, BwtBuf, BSC_CODER_STATIC, 0);
+    bsc_qlfc_output_limit := 0;
+    if GetEnvironmentVariable('TVCT_DEBUG') <> '' then WriteLn(StdErr, 'dbg: bsc decode done ', R);
     if R <> BwtSize then
       Exit;
     kernel_bwt_inverse(BwtBuf, BwtSize, Primary, Samples, NSamples, SAMPLE_RATE,
@@ -306,6 +317,7 @@ begin
         PutU32(@Blk[4], LongWord(N));
         PutU32(@Blk[8], LongWord(METHOD_RAW));
         PutU32(@Blk[12], Crc);
+        PutU32(@Blk[16], Crc32c(0, SrcBuf[0], N));
         Dst.WriteBuffer(Blk[0], BLOCK_HEADER_SIZE);
         Dst.WriteBuffer(SrcBuf[0], N);
         Inc(Stats.OutBytes, BLOCK_HEADER_SIZE + N);
@@ -317,6 +329,7 @@ begin
         PutU32(@Blk[4], LongWord(PayloadLen));
         PutU32(@Blk[8], LongWord(METHOD_BWT));
         PutU32(@Blk[12], Crc);
+        PutU32(@Blk[16], Crc32c(0, Payload[0], PayloadLen));
         Dst.WriteBuffer(Blk[0], BLOCK_HEADER_SIZE);
         PutU32(@Blk[0], LongWord(BwtSize));
         PutU32(@Blk[4], LongWord(Primary));
@@ -346,7 +359,7 @@ var
   Buf, OutBuf, Samples: PByte;
   BlockSize, OrigSize, PayloadLen, Method, BwtSize, Primary, NSamples,
     i, MaxSamples: Int32;
-  Crc: LongWord;
+  Crc, PayloadCrc: LongWord;
 begin
   Result := False;
   Stats.InBytes := 0;
@@ -375,6 +388,7 @@ begin
       PayloadLen := Int32(GetU32(@Blk[4]));
       Method := Int32(GetU32(@Blk[8]));
       Crc := GetU32(@Blk[12]);
+      PayloadCrc := GetU32(@Blk[16]);
       if (OrigSize <= 0) or (OrigSize > BlockSize) then
         Exit;
       if (PayloadLen <= 0) or (PayloadLen > BlockSize + 4096) then
@@ -385,6 +399,8 @@ begin
         if PayloadLen <> OrigSize then
           Exit;
         ReadExact(Src, OutBuf, OrigSize);
+        if Crc32c(0, OutBuf[0], OrigSize) <> PayloadCrc then
+          Exit;
       end
       else if Method = METHOD_BWT then
       begin
@@ -396,6 +412,8 @@ begin
           Exit;
         ReadExact(Src, Samples, NSamples * SizeOf(Int32));
         ReadExact(Src, Buf, PayloadLen);
+        if Crc32c(0, Buf[0], PayloadLen) <> PayloadCrc then
+          Exit;
         if not DecompressBlock(Buf, PayloadLen, OrigSize, BwtSize, Primary,
                                NSamples, PInt32(Samples), OutBuf) then
           Exit;
@@ -490,6 +508,7 @@ begin
           PutU32(@Blk[4], LongWord(Jobs[i].N));
           PutU32(@Blk[8], LongWord(METHOD_RAW));
           PutU32(@Blk[12], Jobs[i].Crc);
+          PutU32(@Blk[16], Crc32c(0, Jobs[i].Src[0], Jobs[i].N));
           Dst.WriteBuffer(Blk[0], BLOCK_HEADER_SIZE);
           Dst.WriteBuffer(Jobs[i].Src[0], Jobs[i].N);
           Inc(Stats.OutBytes, BLOCK_HEADER_SIZE + Jobs[i].N);
@@ -501,6 +520,7 @@ begin
           PutU32(@Blk[4], LongWord(Jobs[i].PayloadLen));
           PutU32(@Blk[8], LongWord(METHOD_BWT));
           PutU32(@Blk[12], Jobs[i].Crc);
+          PutU32(@Blk[16], Crc32c(0, Jobs[i].Payload[0], Jobs[i].PayloadLen));
           Dst.WriteBuffer(Blk[0], BLOCK_HEADER_SIZE);
           PutU32(@Blk[0], LongWord(Jobs[i].BwtSize));
           PutU32(@Blk[4], LongWord(Jobs[i].Primary));
@@ -535,6 +555,7 @@ var
   Jobs: array of TBlockJob;
   Workers: array of TBlockWorker;
   BlockSize, count, i, Method, MaxSamples: Int32;
+  PayloadCrc: LongWord;
 begin
   Result := False;
   Stats.InBytes := 0;
@@ -573,6 +594,7 @@ begin
         Jobs[count].PayloadLen := Int32(GetU32(@Blk[4]));
         Method := Int32(GetU32(@Blk[8]));
         Jobs[count].Crc := GetU32(@Blk[12]);
+        PayloadCrc := GetU32(@Blk[16]);
         if (Jobs[count].N <= 0) or (Jobs[count].N > BlockSize) then
           Exit;
         if Jobs[count].PayloadLen <= 0 then
@@ -582,6 +604,8 @@ begin
           if Jobs[count].PayloadLen <> Jobs[count].N then
             Exit;
           ReadExact(Src, Jobs[count].OutBuf, Jobs[count].N);
+          if Crc32c(0, Jobs[count].OutBuf[0], Jobs[count].N) <> PayloadCrc then
+            Exit;
           Jobs[count].Raw := True;
           Jobs[count].Ok := True;
         end
@@ -595,6 +619,8 @@ begin
             Exit;
           ReadExact(Src, PByte(Jobs[count].Samples), Jobs[count].NSamples * SizeOf(Int32));
           ReadExact(Src, Jobs[count].Payload, Jobs[count].PayloadLen);
+          if Crc32c(0, Jobs[count].Payload[0], Jobs[count].PayloadLen) <> PayloadCrc then
+            Exit;
           Jobs[count].Raw := False;
         end
         else

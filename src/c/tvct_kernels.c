@@ -35,6 +35,8 @@ void tvct_bwt_inverse(const uint8_t *bwt, int32_t n, int32_t primary,
 
     if (n <= 0)
         return;
+    if (primary < 0 || primary > n)
+        primary = 0;
 
     /* Materialise the sentinel-extended BWT: bp[i] for i != primary is the
      * byte, and bp[primary] is never read. */
@@ -110,6 +112,8 @@ void tvct_bwt_inverse(const uint8_t *bwt, int32_t n, int32_t primary,
             if (e > n - 1)
                 e = n - 1;
             rows[c] = (uint32_t)samples[chunk];
+            if ((int32_t)rows[c] > n)
+                rows[c] = 0;
             ends[c] = e;
             starts[c] = chunk * rate;
             lens[c] = e - starts[c] + 1;

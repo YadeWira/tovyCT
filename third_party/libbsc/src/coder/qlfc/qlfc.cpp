@@ -45,6 +45,10 @@ See also the bsc and libbsc web site:
 
 #include "qlfc_model.h"
 
+/* Set by the caller before decoding: the decoder refuses a stream that claims
+   more output than the caller can hold. */
+int bsc_qlfc_output_limit = 0;
+
 #if defined(LIBBSC_DYNAMIC_CPU_DISPATCH)
     unsigned char * bsc_qlfc_transform(const unsigned char * RESTRICT input, unsigned char * RESTRICT buffer, int n, unsigned char * RESTRICT MTFTable);
     unsigned char * bsc_qlfc_transform_avx512(const unsigned char * RESTRICT input, unsigned char * RESTRICT buffer, int n, unsigned char * RESTRICT MTFTable);
@@ -1456,6 +1460,7 @@ int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
 
     coder.InitDecoder(input);
     int n = (int)coder.DecodeWord();
+    if (n < 0 || (bsc_qlfc_output_limit > 0 && n > bsc_qlfc_output_limit)) return LIBBSC_NOT_COMPRESSIBLE;
 
     unsigned char usedChar[ALPHABET_SIZE];
     for (int i = 0; i < ALPHABET_SIZE; ++i) usedChar[i] = 0;
@@ -1766,6 +1771,7 @@ int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char
 
     coder.InitDecoder(input);
     int n = (int)coder.DecodeWord();
+    if (n < 0 || (bsc_qlfc_output_limit > 0 && n > bsc_qlfc_output_limit)) return LIBBSC_NOT_COMPRESSIBLE;
 
     unsigned char usedChar[ALPHABET_SIZE];
     for (int i = 0; i < ALPHABET_SIZE; ++i) usedChar[i] = 0;
@@ -2020,6 +2026,7 @@ int QLFC_FAST_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char *
     coder.InitDecoder(input);
 
     int n = (int)coder.DecodeWord();
+    if (n < 0 || (bsc_qlfc_output_limit > 0 && n > bsc_qlfc_output_limit)) return LIBBSC_NOT_COMPRESSIBLE;
 
     unsigned char usedChar[ALPHABET_SIZE];
     for (int i = 0; i < ALPHABET_SIZE; ++i) usedChar[i] = 0;

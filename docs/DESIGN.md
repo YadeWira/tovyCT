@@ -247,6 +247,14 @@ Decoding runs in C kernels. The encoder stores the LF-chain row of every
 so the decoder walks eight independent chains instead of one serial one.
 ## 4. What is still open
 
+- **The entropy decoder is not safe on hostile input.** QLFC reads the decoded
+  size from the arithmetic stream and trusts it. The block CRC catches random
+  corruption, and the decoder checks every index it is given, but a fabricated
+  stream with a recomputed CRC reaches a wild read. Fuzzing found a case where a
+  one-byte change in the payload (with the CRC patched) faults inside the coder.
+  Options: a guard-page sandbox around the entropy step (turn the fault into
+  -1), or a hardened coder of our own.
+
 - **SA-IS in Pascal at speed.** The one real risk. A 16 MB block needs a
   suffix array build at 30+ MB/s to keep the encoder above 15 MB/s overall.
   Fallback: smaller blocks at the fast levels and SA-IS tuning at the high ones.

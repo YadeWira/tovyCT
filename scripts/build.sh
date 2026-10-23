@@ -73,6 +73,11 @@ else
   FPCOPT="-O3"; MODE=""
 fi
 
+# libbsc reads the compressed stream through 16-bit loads; the explicit memcpy
+# path is well defined and does not depend on the architecture tolerating
+# misaligned accesses.
+CFLAGS="$CFLAGS -DLIBBSC_NO_UNALIGNED_ACCESS"
+
 DEFS=""
 LIBS=""
 for d in $WINLIB; do
@@ -122,14 +127,11 @@ $FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" $LIBS -Fu"$OUT/units" -
 cp include/tvct.h "$OUT/tvct.h"
 
 if [ "$TARGET" = host ] && command -v cc >/dev/null 2>&1; then
-  if [ "$(uname -s)" = Darwin ]; then
-    cc -O2 -I"$OUT" tests/test_api.c -L"$OUT" -ltvct -o "$OUT/test_api"
-  else
-    cc -O2 -I"$OUT" tests/test_api.c -L"$OUT" -ltvct -Wl,-rpath,"$(pwd)/$OUT" \
-       -o "$OUT/test_api"
-    cc -O2 -I"$OUT" tests/test_truncate.c -L"$OUT" -ltvct \
-       -Wl,-rpath,"$(pwd)/$OUT" -o "$OUT/test_truncate"
-  fi
+  for t in tests/test_api.c tests/test_truncate.c tests/test_hostile.c \
+           tests/test_payload.c; do
+    cc -O2 -I"$OUT" "$t" -L"$OUT" -ltvct -Wl,-rpath,"$(pwd)/$OUT" \
+       -o "$OUT/$(basename "$t" .c)"
+  done
 fi
 
 echo "built in $OUT"

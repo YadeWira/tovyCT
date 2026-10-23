@@ -66,7 +66,10 @@ private:
     unsigned int ari_cache;
     unsigned int ari_range;
 
-    const unsigned short * RESTRICT ari_input;
+    /* Bytes, not shorts: the compressed stream has no alignment guarantee, and
+       forming a misaligned unsigned short* is undefined even if the load is
+       done with memcpy. */
+    const unsigned char * RESTRICT ari_input;
           unsigned short * RESTRICT ari_output;
           unsigned short * RESTRICT ari_outputEOB;
           unsigned short * RESTRICT ari_outputStart;
@@ -83,18 +86,15 @@ private:
     INLINE unsigned short InputShort()
     {
         if (bsc_qlfc_input_end != 0 &&
-            (const unsigned char *)ari_input + sizeof(unsigned short) > bsc_qlfc_input_end)
+            bsc_qlfc_input_end - ari_input < (ptrdiff_t)sizeof(unsigned short))
         {
             bsc_qlfc_overrun = 1;
             return 0;
         }
-#ifndef LIBBSC_NO_UNALIGNED_ACCESS
-        return *ari_input++;
-#else
         unsigned short s;
-        memcpy(&s, ari_input++, sizeof(unsigned short));
+        memcpy(&s, ari_input, sizeof(unsigned short));
+        ari_input += sizeof(unsigned short);
         return s;
-#endif
     };
 
     NOINLINE unsigned int ShiftLowSlow()
@@ -216,7 +216,7 @@ public:
 
     INLINE void InitDecoder(const unsigned char * input)
     {
-        ari_input = (unsigned short *)input;
+        ari_input = input;
         ari_code  = 0;
         ari_range = 0xffffffff;
         ari_code  = (ari_code << 16) | InputShort();

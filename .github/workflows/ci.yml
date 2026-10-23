@@ -59,6 +59,17 @@ jobs:
           name: hash-macos-arm64
           path: hash.txt
 
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal and clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fpc clang
+      - name: Fuzz the entropy decoder
+        run: sh .github/fuzz.sh 60 2
+
   determinism:
     needs: [linux-x64, linux-arm64, macos-arm64]
     runs-on: ubuntu-latest

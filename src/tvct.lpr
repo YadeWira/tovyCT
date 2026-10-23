@@ -125,7 +125,7 @@ begin
         on E: Exception do
         begin
           WriteLn(StdErr, 'error: ', E.Message);
-          Exit(False);
+          Result := False;
         end;
       end;
       if Result and not Quiet then
@@ -133,6 +133,10 @@ begin
     finally
       Dst.Free;
     end;
+    { A failed decode leaves a prefix of the data, which is worse than no file:
+      the caller cannot tell it from a valid shorter stream. }
+    if not Result then
+      DeleteFile(OutPath);
   finally
     Src.Free;
   end;

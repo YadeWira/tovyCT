@@ -32,6 +32,12 @@ function bsc_coder_compress(input, output: PByte; n, coder, features: Int32): In
 function bsc_coder_decompress(input, output: PByte; coder, features: Int32): Int32;
   cdecl; external name 'bsc_coder_decompress';
 
+{ Decompress with the input and output sizes the caller knows: the coder
+  validates its own block table instead of trusting the stream. }
+function bsc_coder_decompress_bounded(input: PByte; InputSize: Int32;
+  output: PByte; OutputSize: Int32; coder, features: Int32): Int32;
+  cdecl; external name 'bsc_coder_decompress_bounded';
+
 { Output bound checked by the decoder: a stream that claims more bytes than the
   caller can hold is rejected instead of written past the buffer. }
 procedure bsc_qlfc_set_output_limit(limit: Int32); cdecl;

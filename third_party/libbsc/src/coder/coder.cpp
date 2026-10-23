@@ -40,6 +40,10 @@ See also the bsc and libbsc web site:
 
 #include "qlfc/qlfc.h"
 
+/* Implemented in qlfc.cpp: bounds the range coder to the caller's buffers. */
+extern "C" void bsc_qlfc_set_output_limit(int limit);
+extern "C" void bsc_qlfc_set_input_end(const unsigned char * end);
+
 int bsc_coder_init(int features)
 {
     int result = LIBBSC_NO_ERROR;
@@ -273,6 +277,66 @@ int bsc_coder_decode_block(const unsigned char * input, unsigned char * output, 
     if (coder == LIBBSC_CODER_QLFC_FAST)     return bsc_qlfc_fast_decode_block    (input, output);
 
     return LIBBSC_BAD_PARAMETER;
+}
+
+/* Same as bsc_coder_decompress, but the caller states how many bytes of input
+   are valid and how much room the output has. The original signature predates
+   this and trusts the stream: with a 9-byte input claiming 128 blocks it reads
+   the block table past the buffer (found by the QLFC fuzzer). Every field is
+   checked here before it is used as a size or an offset. */
+int bsc_coder_decompress_bounded(const unsigned char * input, int inputSize, unsigned char * output, int outputSize, int coder, int features)
+{
+    if ((coder != LIBBSC_CODER_QLFC_STATIC) && (coder != LIBBSC_CODER_QLFC_ADAPTIVE) && (coder != LIBBSC_CODER_QLFC_FAST))
+    {
+        return LIBBSC_BAD_PARAMETER;
+    }
+    if (inputSize < 1 || outputSize < 1) return LIBBSC_BAD_PARAMETER;
+
+    int nBlocks = input[0];
+    if (nBlocks == 1)
+    {
+        bsc_qlfc_set_output_limit(outputSize);
+        bsc_qlfc_set_input_end(input + inputSize);
+        int result = bsc_coder_decode_block(input + 1, output, coder);
+        bsc_qlfc_set_input_end(0);
+        return result;
+    }
+    if (nBlocks <= 0 || nBlocks > ALPHABET_SIZE) return LIBBSC_BAD_PARAMETER;
+
+    const int tableEnd = 1 + 8 * nBlocks;
+    if (inputSize < tableEnd) return LIBBSC_BAD_PARAMETER;
+
+    int decompressionResult[ALPHABET_SIZE];
+    int inputPtr = tableEnd, outputPtr = 0;
+    for (int blockId = 0; blockId < nBlocks; ++blockId)
+    {
+        int blockInput, blockOutput;
+        memcpy(&blockInput , input + 1 + 8 * blockId + 4, sizeof(int));
+        memcpy(&blockOutput, input + 1 + 8 * blockId + 0, sizeof(int));
+
+        /* A zero size is not a valid block, and a zero output limit would
+           switch the coder's bound off (0 means "no limit" there). */
+        if (blockInput <= 0 || blockOutput <= 0) return LIBBSC_BAD_PARAMETER;
+        if (blockInput > inputSize - inputPtr) return LIBBSC_BAD_PARAMETER;
+        if (blockOutput > outputSize - outputPtr) return LIBBSC_BAD_PARAMETER;
+
+        if (blockInput == blockOutput)
+        {
+            memcpy(output + outputPtr, input + inputPtr, blockInput);
+            decompressionResult[blockId] = blockOutput;
+        }
+        else
+        {
+            bsc_qlfc_set_output_limit(blockOutput);
+            bsc_qlfc_set_input_end(input + inputPtr + blockInput);
+            decompressionResult[blockId] = bsc_coder_decode_block(input + inputPtr, output + outputPtr, coder);
+            bsc_qlfc_set_input_end(0);
+            if (decompressionResult[blockId] < 0) return decompressionResult[blockId];
+            if (decompressionResult[blockId] != blockOutput) return LIBBSC_BAD_PARAMETER;
+        }
+        inputPtr += blockInput; outputPtr += blockOutput;
+    }
+    return outputPtr;
 }
 
 int bsc_coder_decompress(const unsigned char * input, unsigned char * output, int coder, int features)

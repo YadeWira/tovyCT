@@ -45,10 +45,35 @@ See also the bsc and libbsc web site:
 
 #include "qlfc_model.h"
 
+/* floor(log2(rank - 1)) without the undefined clz(0). Both the encoder and the
+   decoder use this, so a one-character alphabet (rank 1) now means "no rank
+   bits" consistently instead of relying on whatever the compiler does with
+   __builtin_clz(0), which UBSan rejects. */
+static inline int bsc_rank_bits(int rank)
+{
+    return rank > 1 ? (int)bsc_bit_scan_reverse(rank - 1) : 0;
+}
+
+/* floor(log2(v)) for v >= 0; used for history contexts, where rank 0 is a
+   valid value and __builtin_clz(0) is not. */
+static inline int bsc_floor_log2(int v)
+{
+    return v > 0 ? (int)bsc_bit_scan_reverse((unsigned int)v) : 0;
+}
+
+
 /* Set by the caller before decoding: the decoder refuses a stream that claims
    more output than the caller can hold. A setter rather than an exported
-   variable, which does not link through Free Pascal on every platform. */
-static int bsc_qlfc_output_limit = 0;
+   variable, which does not link through Free Pascal on every platform.
+
+   Thread-local: blocks are decoded in parallel and each one has its own
+   buffer, so a shared limit would let one worker's block size reject another
+   worker's block (caught by the multithreaded round-trip). */
+#if defined(_MSC_VER)
+static __declspec(thread) int bsc_qlfc_output_limit = 0;
+#else
+static __thread int bsc_qlfc_output_limit = 0;
+#endif
 
 /* Input bound for the range coder: the caller points it at the end of the
    compressed block. thread-local because blocks decode in parallel. */
@@ -611,7 +636,7 @@ int QLFC_ADAPTIVE_ENCODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
 
         if (currentChar == prevChar)
         {
-            maxRank = bsc_bit_scan_reverse(rank - 1);
+            maxRank = bsc_rank_bits(rank);
             break;
         }
 
@@ -775,7 +800,7 @@ int QLFC_ADAPTIVE_ENCODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
         }
         else
         {
-            rankHistory[currentChar] = (unsigned char)bsc_bit_scan_reverse(rank);
+            rankHistory[currentChar] = (unsigned char)bsc_floor_log2(rank);
 
             statePredictor  = & model->Rank.Escape.StateModel[state][0];
             charPredictor   = & model->Rank.Escape.CharModel[currentChar][0];
@@ -977,7 +1002,7 @@ int QLFC_STATIC_ENCODE_FUNCTION_NAME (const unsigned char * input, unsigned char
 
         if (currentChar == prevChar)
         {
-            maxRank = bsc_bit_scan_reverse(rank - 1);
+            maxRank = bsc_rank_bits(rank);
             break;
         }
 
@@ -1120,7 +1145,7 @@ int QLFC_STATIC_ENCODE_FUNCTION_NAME (const unsigned char * input, unsigned char
         }
         else
         {
-            rankHistory[currentChar] = (unsigned char)bsc_bit_scan_reverse(rank);
+            rankHistory[currentChar] = (unsigned char)bsc_floor_log2(rank);
 
             statePredictor  = & model->Rank.Escape.StateModel[state][0];
             charPredictor   = & model->Rank.Escape.CharModel[currentChar][0];
@@ -1465,6 +1490,12 @@ int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
 
     bsc_qlfc_init_model(model);
 
+    /* The alphabet loop below fills only as many entries as the stream
+       declares. A hostile rank can move bytes from the rest, so start from a
+       defined table: the output is still rejected by the block CRC, but it is
+       deterministic and free of uninitialised reads. */
+    for (int i = 0; i < ALPHABET_SIZE; ++i) MTFTable[i] = 0;
+
     int contextRank0 = 0;
     int contextRank4 = 0;
     int contextRun   = 0;
@@ -1520,7 +1551,7 @@ int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
 
         if (currentChar == prevChar)
         {
-            maxRank = bsc_bit_scan_reverse(rank - 1);
+            maxRank = bsc_rank_bits(rank);
             break;
         }
 
@@ -1556,7 +1587,7 @@ int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
                 int bitRankSize = 1;
                 while (true)
                 {
-                    if (bitRankSize == maxRank) break;
+                    if (bitRankSize >= maxRank) break;
                     if (coder.DecodeBit(mixer->Mixup(*charPredictor, *statePredictor, *staticPredictor)))
                     {
                         ProbabilityCounter::UpdateBit1(*statePredictor,  M_RANK_ES_TH1, M_RANK_ES_AR1); statePredictor++;
@@ -1641,9 +1672,12 @@ int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
                 }
             }
 
-            rankHistory[currentChar] = (unsigned char)bsc_bit_scan_reverse(rank);
+            rankHistory[currentChar] = (unsigned char)bsc_floor_log2(rank);
         }
 
+        /* A hostile stream can decode any rank; the table only has
+           ALPHABET_SIZE entries. */
+        if (rank < 0 || rank >= ALPHABET_SIZE) return LIBBSC_NOT_COMPRESSIBLE;
         {
 #if LIBBSC_CPU_FEATURE >= LIBBSC_CPU_FEATURE_SSE41
             __m128i * MTFTable_p = (__m128i *)&MTFTable[rank & (-16)];
@@ -1694,6 +1728,7 @@ int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
             int runSize = 1, bitRunSize = 1;
             while (true)
             {
+                if (bitRunSize >= 31) return LIBBSC_NOT_COMPRESSIBLE;
                 if (coder.DecodeBit(mixer->Mixup(*charPredictor, *statePredictor, *staticPredictor)))
                 {
                     ProbabilityCounter::UpdateBit1(*statePredictor,  M_RUN_ES_TH1, M_RUN_ES_AR1); statePredictor++;
@@ -1743,7 +1778,7 @@ int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
             contextRank4 = ((contextRank4 << 2) | (rank < 3    ? rank : 3)) & 0xff;
             contextRun   = ((contextRun   << 1) | (runSize < 3 ? 1    : 0)) & 0xf;
 
-            if (i + runSize > n) return LIBBSC_NOT_COMPRESSIBLE;
+            if (runSize > n - i) return LIBBSC_NOT_COMPRESSIBLE;
             for (; runSize > 0; --runSize) output[i++] = currentChar;
         }
         else
@@ -1777,6 +1812,12 @@ int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char
     unsigned char ALIGNED(64) MTFTable[ALPHABET_SIZE];
 
     bsc_qlfc_init_model(model);
+
+    /* The alphabet loop below fills only as many entries as the stream
+       declares. A hostile rank can move bytes from the rest, so start from a
+       defined table: the output is still rejected by the block CRC, but it is
+       deterministic and free of uninitialised reads. */
+    for (int i = 0; i < ALPHABET_SIZE; ++i) MTFTable[i] = 0;
 
     int contextRank0 = 0;
     int contextRank4 = 0;
@@ -1833,7 +1874,7 @@ int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char
 
         if (currentChar == prevChar)
         {
-            maxRank = bsc_bit_scan_reverse(rank - 1);
+            maxRank = bsc_rank_bits(rank);
             break;
         }
 
@@ -1866,7 +1907,7 @@ int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char
                 int bitRankSize = 1;
                 while (true)
                 {
-                    if (bitRankSize == maxRank) break;
+                    if (bitRankSize >= maxRank) break;
                     if (coder.DecodeBit((*charPredictor * F_RANK_EM_LR0 + *statePredictor * F_RANK_EM_LR1 + *staticPredictor * F_RANK_EM_LR2) >> 5))
                     {
                         ProbabilityCounter::UpdateBit1(*statePredictor,  F_RANK_ES_TH1, F_RANK_ES_AR1); statePredictor++;
@@ -1926,9 +1967,12 @@ int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char
                 context += context + b; rank += rank + b;
             }
 
-            rankHistory[currentChar] = (unsigned char)bsc_bit_scan_reverse(rank);
+            rankHistory[currentChar] = (unsigned char)bsc_floor_log2(rank);
         }
 
+        /* A hostile stream can decode any rank; the table only has
+           ALPHABET_SIZE entries. */
+        if (rank < 0 || rank >= ALPHABET_SIZE) return LIBBSC_NOT_COMPRESSIBLE;
         {
 #if LIBBSC_CPU_FEATURE >= LIBBSC_CPU_FEATURE_SSE41
             __m128i * MTFTable_p = (__m128i *)&MTFTable[rank & (-16)];
@@ -1976,6 +2020,11 @@ int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char
             int runSize = 1, bitRunSize = 1;
             while (true)
             {
+                /* The mantissa tables have 32 entries. A valid run never
+                   reaches 31 bits (the encoder derives the width from an int),
+                   so anything longer is corruption and would index past the
+                   model. */
+                if (bitRunSize >= 31) return LIBBSC_NOT_COMPRESSIBLE;
                 if (coder.DecodeBit((*charPredictor * F_RUN_EM_LR0 + *statePredictor * F_RUN_EM_LR1 + *staticPredictor * F_RUN_EM_LR2) >> 5))
                 {
                     ProbabilityCounter::UpdateBit1(*statePredictor,  F_RUN_ES_TH1, F_RUN_ES_AR1); statePredictor++;
@@ -2013,7 +2062,7 @@ int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char
             contextRank4 = ((contextRank4 << 2) | (rank < 3    ? rank : 3)) & 0xff;
             contextRun   = ((contextRun   << 1) | (runSize < 3 ? 1    : 0)) & 0xf;
         
-            if (i + runSize > n) return LIBBSC_NOT_COMPRESSIBLE;
+            if (runSize > n - i) return LIBBSC_NOT_COMPRESSIBLE;
             for (; runSize > 0; --runSize) output[i++] = currentChar;
         }
         else
@@ -2044,6 +2093,12 @@ int QLFC_FAST_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char *
     unsigned char ALIGNED(64) MTFTable[ALPHABET_SIZE];
 
     bsc_qlfc_init_model(model);
+
+    /* The alphabet loop below fills only as many entries as the stream
+       declares. A hostile rank can move bytes from the rest, so start from a
+       defined table: the output is still rejected by the block CRC, but it is
+       deterministic and free of uninitialised reads. */
+    for (int i = 0; i < ALPHABET_SIZE; ++i) MTFTable[i] = 0;
 
     RangeCoder coder;
     coder.InitDecoder(input);
@@ -2140,6 +2195,7 @@ int QLFC_FAST_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char *
                     rank += rank + b;
                 }
 
+                if (rank < 0 || rank >= ALPHABET_SIZE) return LIBBSC_NOT_COMPRESSIBLE;
                 {
 #if LIBBSC_CPU_FEATURE >= LIBBSC_CPU_FEATURE_SSE41
                     __m128i * MTFTable_p = (__m128i *)&MTFTable[rank & (-16)];
@@ -2212,7 +2268,7 @@ int QLFC_FAST_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char *
                         runSize += runSize + b;
                     }
 
-                    if (output + runSize > outputBase + n) return LIBBSC_NOT_COMPRESSIBLE;
+                    if (runSize > outputBase + n - output) return LIBBSC_NOT_COMPRESSIBLE;
                     for (; runSize > 0; --runSize) { *output++ = currentChar; }
                 }
                 else
@@ -2225,7 +2281,7 @@ int QLFC_FAST_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char *
                         runSize += runSize + b;
                     }
 
-                    if (output + runSize > outputBase + n) return LIBBSC_NOT_COMPRESSIBLE;
+                    if (runSize > outputBase + n - output) return LIBBSC_NOT_COMPRESSIBLE;
                     for (; runSize > 0; --runSize) { *output++ = currentChar; }
                 }
             }

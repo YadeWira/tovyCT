@@ -15,6 +15,17 @@ Grebnov — the same author as libsais.
   | `coder/qlfc/qlfc.cpp` | `bsc_qlfc_set_output_limit`: the decoder rejects a stream that claims more output than the caller can hold |
   | `coder/qlfc/qlfc.cpp` | every run write is checked against the output size (`i + runSize > n`), which closes a heap overflow the fuzzer found |
   | `coder/qlfc/qlfc.cpp`, `coder/common/rangecoder.h` | `bsc_qlfc_set_input_end`: the range coder stops at the end of the compressed block instead of reading past it, and `bsc_qlfc_overrun` turns that into `LIBBSC_NOT_COMPRESSIBLE` |
+  | `coder/qlfc/qlfc.cpp` | a decoded rank is rejected if it is not a valid MTF index (`rank >= ALPHABET_SIZE`); a crafted stream decoded rank 691 and read past the stack table |
+  | `coder/qlfc/qlfc.cpp` | `bsc_rank_bits`: `floor(log2(rank - 1))` without the undefined `__builtin_clz(0)`, used by encoder and decoder; a one-character alphabet (rank 1) no longer depends on compiler luck |
+  | `coder/qlfc/qlfc.cpp` | the exponent-size loop stops at `bitRankSize >= maxRank`; with `maxRank = 0` the old `==` test never fired and the loop followed one bits indefinitely |
+  | `coder/qlfc/qlfc.cpp` | a run length is capped at 30 bits: the decoder's exponent loop followed one bits forever and indexed the 32-entry run model out of bounds (a use-after-free once the index landed in a freed chunk) |
+  | `coder/qlfc/qlfc.cpp` | the run write check is `runSize > n - i` instead of `i + runSize > n`, which overflows for a hostile run length and lets a 2 GB write pass |
+  | `coder/coder.cpp` | `bsc_coder_decompress_bounded` rejects a block with a zero input or output size: zero output used to switch the QLFC output limit off (that limit uses 0 for "no limit"), and the block then wrote past the caller's buffer |
+  | `coder/qlfc/qlfc.cpp` | `bsc_floor_log2` for history contexts: `bsc_bit_scan_reverse(rank)` was called with rank 0 in the escape path, which is another `clz(0)` |
+  | `coder/qlfc/qlfc.cpp` | the decoder clears the 256-entry MTF table before filling it: a hostile rank could move entries the stream never wrote, which Valgrind saw as an uninitialised read |
+  | `coder/qlfc/qlfc.cpp` | the output limit is thread-local: blocks decode in parallel and a shared limit let one worker's block size reject another's |
+  | `coder/qlfc/qlfc.cpp`, `coder/common/rangecoder.h` | `bsc_coder_decompress_bounded`: the caller passes the input and output sizes, and every block-table size and offset is validated before use; the old signature had no length and read past a short input |
+  | `coder/common/rangecoder.h` | the range coder reads through `const unsigned char *` with `memcpy` instead of casting to `unsigned short *`: the stream has no alignment guarantee and the cast was undefined behaviour (UBSan found it) |
 
   Only the coder subset is compiled: `coder/coder.cpp`, `coder/qlfc/qlfc.cpp`,
   `coder/qlfc/qlfc_model.cpp`, `platform/platform.cpp`, `adler32/adler32.cpp`.

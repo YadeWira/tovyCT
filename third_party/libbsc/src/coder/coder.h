@@ -65,6 +65,21 @@ extern "C" {
     */
     int bsc_coder_decompress(const unsigned char * input, unsigned char * output, int coder, int features);
 
+    /**
+    * Decompress a memory block, with the input and output sizes known.
+    * Every size and offset in the stream's block table is validated against
+    * them before use; the unbounded version cannot do that because its
+    * signature carries no length.
+    * @param input       - the input memory block.
+    * @param inputSize   - how many bytes of input are valid.
+    * @param output      - the output memory block.
+    * @param outputSize  - how many bytes of output are available.
+    * @param coder       - the entropy coding algorithm.
+    * @param features    - the set of additional features.
+    * @return the length of decompressed memory block if no error occurred, error code otherwise.
+    */
+    int bsc_coder_decompress_bounded(const unsigned char * input, int inputSize, unsigned char * output, int outputSize, int coder, int features);
+
 #ifdef __cplusplus
 }
 #endif

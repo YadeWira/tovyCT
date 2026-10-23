@@ -18,12 +18,19 @@ if [ -x build/test_api ]; then
   fi
 fi
 
+if [ -x build/test_hostile ]; then
+  ./build/test_hostile
+fi
+
 if [ -x build/test_truncate ]; then
   head -c 65536 /tmp/tvct-sample.txt > /tmp/tvct-trunc.txt
   ./build/test_truncate /tmp/tvct-trunc.txt
 fi
 
 ./build/tvct c /tmp/tvct-sample.txt /tmp/tvct-sample.tvct -b 1 -T 1
+if [ -x build/test_payload ]; then
+  ./build/test_payload /tmp/tvct-sample.tvct /tmp/tvct-sample.txt
+fi
 ./build/tvct t /tmp/tvct-sample.tvct
 ./build/tvct d /tmp/tvct-sample.tvct /tmp/tvct-sample.out -T 2
 cmp /tmp/tvct-sample.txt /tmp/tvct-sample.out

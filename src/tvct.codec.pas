@@ -190,6 +190,26 @@ begin
   Dst.WriteBuffer(Hdr[0], CODEC_HEADER_SIZE);
 end;
 
+{ A fabricated header must not be able to ask for unbounded memory. Nothing
+  real compresses anywhere near this well (16 MiB of zeros, the best case we
+  could measure, is 997:1), so a declared size above RATIO_CAP:1 plus a small
+  allowance for tiny streams is treated as corruption before any allocation. }
+function MaxPlausibleTotal(Remaining: Int64): Int64;
+const
+  RATIO_CAP = 4096;
+  SLACK = 1 shl 20;   { 1 MiB: a 100-byte stream may still declare a large file }
+begin
+  if Remaining < 0 then
+    Remaining := 0;
+  Result := (Remaining * RATIO_CAP) + SLACK;
+end;
+
+function TotalSizePlausible(Total, Remaining: Int64): Boolean;
+begin
+  Result := (Total >= 0) and (Remaining >= 0) and
+            (Total <= MaxPlausibleTotal(Remaining));
+end;
+
 function ReadHeader(Src: TStream; out BlockLog: Int32; out Total: Int64;
   out Known: Boolean): Boolean;
 var
@@ -205,9 +225,9 @@ begin
   BlockLog := Hdr[5];
   Known := (Hdr[6] and 1) <> 0;
   Total := GetU64(@Hdr[8]);
-  if Known and (Total < 0) then
+  if Known and not TotalSizePlausible(Total, Int64(Src.Size) - Int64(Src.Position)) then
     Exit;
-  Result := (BlockLog >= 16) and (BlockLog <= 27);
+  Result := (BlockLog >= 16) and (BlockLog <= 26);   { up to 64 MiB }
 end;
 
 function GetU32(P: PByte): LongWord; inline;
@@ -309,11 +329,8 @@ begin
   GetMem(BwtBuf, BwtSize + 1);
   try
     if GetEnvironmentVariable('TVCT_DEBUG') <> '' then WriteLn(StdErr, 'dbg: bsc decode start');
-    bsc_qlfc_set_output_limit(BwtSize);
-    bsc_qlfc_set_input_end(Payload + PayloadLen);
-    R := bsc_coder_decompress(Payload, BwtBuf, BSC_CODER_STATIC, 0);
-    bsc_qlfc_set_output_limit(0);
-    bsc_qlfc_set_input_end(nil);
+    R := bsc_coder_decompress_bounded(Payload, PayloadLen, BwtBuf, BwtSize,
+                                      BSC_CODER_STATIC, 0);
     if GetEnvironmentVariable('TVCT_DEBUG') <> '' then WriteLn(StdErr, 'dbg: bsc decode done ', R);
     if R <> BwtSize then
       Exit;
@@ -345,7 +362,7 @@ begin
   Stats.RawBlocks := 0;
   EnsureBsc;
 
-  if (BlockLog < 16) or (BlockLog > 27) then
+  if (BlockLog < 16) or (BlockLog > 26) then   { the header allows 64 MiB }
     Exit;
   BlockSize := 1 shl BlockLog;
 
@@ -423,9 +440,9 @@ var
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
   Buf, OutBuf, Samples: PByte;
   BlockSize, OrigSize, PayloadLen, Method, BwtSize, Primary, NSamples,
-    i, MaxSamples, BlockLog: Int32;
+    i, MaxSamples, BlockLog, AllocSize: Int32;
   Crc, PayloadCrc: LongWord;
-  Total, Decoded: Int64;
+  Total, Decoded, MaxTotal: Int64;
   Known: Boolean;
 begin
   Result := False;
@@ -438,11 +455,23 @@ begin
   if not ReadHeader(Src, BlockLog, Total, Known) then
     Exit;
   BlockSize := 1 shl BlockLog;
+  { A fabricated header must not ask for a large allocation. The buffers are
+    sized by the declared total when there is one, and in any case by what the
+    compressed size could plausibly expand to. Every block is then checked
+    against the same bound, so no block can claim more. }
+  MaxTotal := MaxPlausibleTotal(Int64(Src.Size) - Int64(Src.Position));
+  AllocSize := BlockSize;
+  if MaxTotal < AllocSize then
+    AllocSize := Int32(MaxTotal);
+  if Known and (Total < AllocSize) then
+    AllocSize := Int32(Total);
+  if AllocSize < 1 then
+    AllocSize := 1;
   Decoded := 0;
 
-  Buf := GetMem(BlockSize + 4096);
-  OutBuf := GetMem(BlockSize);
-  MaxSamples := BlockSize div SAMPLE_RATE + 2;
+  Buf := GetMem(AllocSize + 4096);
+  OutBuf := GetMem(AllocSize);
+  MaxSamples := AllocSize div SAMPLE_RATE + 2;
   Samples := GetMem(MaxSamples * SizeOf(Int32));
   try
     while Src.Position < Src.Size do
@@ -453,9 +482,13 @@ begin
       Method := Int32(GetU32(@Blk[8]));
       Crc := GetU32(@Blk[12]);
       PayloadCrc := GetU32(@Blk[16]);
-      if (OrigSize <= 0) or (OrigSize > BlockSize) then
+      if (OrigSize <= 0) or (OrigSize > AllocSize) then
         Exit;
-      if (PayloadLen <= 0) or (PayloadLen > BlockSize + 4096) then
+      if Decoded + OrigSize > MaxTotal then
+        Exit;
+      if Known and (Decoded + OrigSize > Total) then
+        Exit;
+      if (PayloadLen <= 0) or (PayloadLen > AllocSize + 4096) then
         Exit;
 
       if Method = METHOD_RAW then
@@ -524,7 +557,7 @@ begin
   Stats.RawBlocks := 0;
   if Threads <= 1 then
     Exit(CompressStream(Src, Dst, BlockLog, Stats));
-  if (BlockLog < 16) or (BlockLog > 27) then
+  if (BlockLog < 16) or (BlockLog > 26) then   { the header allows 64 MiB }
     Exit;
   EnsureBsc;
   BlockSize := 1 shl BlockLog;
@@ -628,9 +661,9 @@ var
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
   Jobs: array of TBlockJob;
   Workers: array of TBlockWorker;
-  BlockSize, count, i, Method, MaxSamples, BlockLog: Int32;
+  BlockSize, count, i, Method, MaxSamples, BlockLog, AllocSize: Int32;
   PayloadCrc: LongWord;
-  Total, Decoded: Int64;
+  Total, Decoded, MaxTotal, Pending: Int64;
   Known: Boolean;
 begin
   Result := False;
@@ -645,21 +678,30 @@ begin
   if not ReadHeader(Src, BlockLog, Total, Known) then
     Exit;
   BlockSize := 1 shl BlockLog;
+  MaxTotal := MaxPlausibleTotal(Int64(Src.Size) - Int64(Src.Position));
+  AllocSize := BlockSize;
+  if MaxTotal < AllocSize then
+    AllocSize := Int32(MaxTotal);
+  if Known and (Total < AllocSize) then
+    AllocSize := Int32(Total);
+  if AllocSize < 1 then
+    AllocSize := 1;
   Decoded := 0;
-  MaxSamples := BlockSize div SAMPLE_RATE + 2;
+  MaxSamples := AllocSize div SAMPLE_RATE + 2;
 
   SetLength(Jobs, Threads);
   SetLength(Workers, Threads);
   for i := 0 to Threads - 1 do
   begin
-    Jobs[i].Payload := GetMem(BlockSize + 4096);
-    Jobs[i].OutBuf := GetMem(BlockSize);
+    Jobs[i].Payload := GetMem(AllocSize + 4096);
+    Jobs[i].OutBuf := GetMem(AllocSize);
     Jobs[i].Samples := GetMem(MaxSamples * SizeOf(Int32));
     Jobs[i].Ok := False;
   end;
   try
     repeat
       count := 0;
+      Pending := 0;
       while (count < Threads) and (Src.Position < Src.Size) do
       begin
         ReadExact(Src, @Blk[0], BLOCK_HEADER_SIZE);
@@ -668,13 +710,22 @@ begin
         Method := Int32(GetU32(@Blk[8]));
         Jobs[count].Crc := GetU32(@Blk[12]);
         PayloadCrc := GetU32(@Blk[16]);
-        if (Jobs[count].N <= 0) or (Jobs[count].N > BlockSize) then
+        if (Jobs[count].N <= 0) or (Jobs[count].N > AllocSize) then
+          Exit;
+        { The batch is read before any of it is written, so Decoded alone does
+          not include it yet: check the whole batch against the total before a
+          single byte reaches the destination. }
+        if Decoded + Pending + Jobs[count].N > MaxTotal then
           Exit;
         if Jobs[count].PayloadLen <= 0 then
+          Exit;
+        if Known and (Decoded + Pending + Jobs[count].N > Total) then
           Exit;
         if Method = METHOD_RAW then
         begin
           if Jobs[count].PayloadLen <> Jobs[count].N then
+            Exit;
+          if Jobs[count].PayloadLen > AllocSize then
             Exit;
           ReadExact(Src, Jobs[count].OutBuf, Jobs[count].N);
           if Crc32c(0, Jobs[count].OutBuf[0], Jobs[count].N) <> PayloadCrc then
@@ -690,6 +741,8 @@ begin
           Jobs[count].NSamples := Int32(GetU32(@Blk[12]));
           if (Jobs[count].NSamples <= 0) or (Jobs[count].NSamples > MaxSamples) then
             Exit;
+          if Jobs[count].PayloadLen > AllocSize + 4096 then
+            Exit;
           ReadExact(Src, PByte(Jobs[count].Samples), Jobs[count].NSamples * SizeOf(Int32));
           ReadExact(Src, Jobs[count].Payload, Jobs[count].PayloadLen);
           if Crc32c(0, Jobs[count].Payload[0], Jobs[count].PayloadLen) <> PayloadCrc then
@@ -698,6 +751,7 @@ begin
         end
         else
           Exit;
+        Inc(Pending, Jobs[count].N);
         Inc(count);
       end;
       if count = 0 then

@@ -165,20 +165,23 @@ The two ways out, to be decided before M1 continues:
 - **Optional libsais.** Vendor libsais (Apache-2.0 WITH LLVM-exception, MIT
   compatible, the same arrangement `bz2-ng` uses), keep the pure-Pascal SA as the
   default fallback, and let a build flag select the C one. Everything else — the
-  format, LZP, BWT wiring, MTF/RLE, rANS, inverse BWT, CLI, C API — stays Pascal
-  and assembly. Compression moves to an estimated 10-15 MB/s.
+  format, BWT wiring, CLI and C API — stays Pascal; the heavy loops move to C.
 - **Go back to LZ.** The measured LZ+rANS model gives 23.5 % at an estimated
   15-25 MB/s in Pascal, with 400+ MB/s decode. Worse ratio than BWT by 25 %,
   better compression speed by 2-4x.
 
-### Assembly kernels
+### Kernels
 
-| target | what is written in assembly |
+The table below was written for the MTF + rANS design. The current codec links
+only the inverse-BWT kernel; the rANS and MTF/RLE kernels remain in the tree but
+are not called, and ARMv7 was dropped by decision.
+
+| target | what is written in C |
 |---|---|
 | x86-64 | rANS decode, MTF/RLE decode (SSE2/AVX2), inverse-BWT chain walk, CRC32C |
 | i386 | the same, scalar or SSE2 |
 | AArch64 | rANS decode, MTF/RLE (NEON), inverse BWT, CRC32 |
-| ARMv7 | NEON MTF/RLE, scalar fallback for the rest |
+| ARMv7 | dropped |
 
 SA-IS stays in Pascal: it is pointer-chasing and memory-bound, and hand-written
 assembly does not pay there; the bucket-sum passes are the only vectorisable
@@ -198,7 +201,7 @@ target. It is a single dependent chain of random reads, so its speed is one
 memory latency per byte. The fix is the one `bz2-ng` uses: the encoder records
 the row at each chunk boundary and the decoder walks several independent chains
 in parallel, which turns a serial latency chain into memory-level parallelism.
-That plan is what the assembly kernels will implement.
+That plan is what the inverse-BWT kernel implements (`src/c/tvct_kernels.c`).
 
 ### M1 end-to-end
 
@@ -247,29 +250,49 @@ Decoding runs in C kernels. The encoder stores the LF-chain row of every
 so the decoder walks eight independent chains instead of one serial one.
 ## 4. What is still open
 
-- **The entropy decoder is hardened, not proved.** QLFC used to trust the size
-  it decodes and could write or read past the caller's buffers on a fabricated
-  stream. The coder now takes an output limit and an input end, and every run
-  write is checked; the block CRC catches corruption before any of that. Fuzzing
-  (20,000 format-aware mutations through the API plus 80M libFuzzer runs under
-  ASan/UBSan) is clean, but the argument rests on measurement. A guard-page
-  sandbox around the entropy step would turn any future fault into -1 as well.
-
-- **SA-IS in Pascal at speed.** The one real risk. A 16 MB block needs a
-  suffix array build at 30+ MB/s to keep the encoder above 15 MB/s overall.
-  Fallback: smaller blocks at the fast levels and SA-IS tuning at the high ones.
-- **LZP parameters.** Match length, hash size and the interaction with BWT need
-  measuring; bzip3's choices are a starting point, not a spec.
-- **Binary data.** BWT is weak on executables. The plan is a raw-block fallback
-  chosen per block, plus documenting that the codec is tuned for text.
-- **Small files.** Block overhead (SA-IS arrays, tables) dominates below ~64 KB.
-  A smaller block mode and a reduced table format are needed for that range.
+- **The entropy decoder is hardened, not proved.** QLFC used to trust what it
+  decoded. A coverage-instrumented fuzzer of the coder (the Pascal container
+  cannot be instrumented) found seven ways to make it misbehave: run writes past
+  the output, reads past the input, an MTF rank of 691 in a 256-entry stack
+  table, a block table read past a short payload, an unbounded run width
+  indexing a 32-entry model (seen as a use-after-free when the index landed in a
+  freed chunk), an `i + runSize` overflow that let a 2 GB write pass the check,
+  and a zero output size in the block table, which disabled the coder's bound
+  because zero meant "no limit". Three undefined behaviours were fixed with
+  them: `__builtin_clz(0)` on a one-character alphabet, misaligned 16-bit loads,
+  and MTF-table entries a hostile rank could read before they were written.
+  Each access now has a bound that comes from the caller, and the decoder has a
+  bounded entry point for the block table. That is still an argument from measurement; a guard-page sandbox around
+  the entropy step would turn any future fault into -1 regardless.
+- **Fuzzing was initially misconfigured, and the numbers said so too late.** The
+  first campaign reported 80M executions with the seed corpus of an older format
+  and an uninstrumented shared library: coverage was 5 edges (the harness only)
+  and every input was rejected at the version byte. The harness now builds the
+  coder with `-fsanitize=fuzzer-no-link`, regenerates the corpus each run, and
+  keeps the inputs that found real bugs as regression seeds. When a fuzzer runs
+  80M inputs in a minute, that is the signal to check what it is measuring.
+- **The Pascal container has no sanitizer coverage.** Its bounds are checked by
+  the deterministic tests (every truncation, appended bytes, bit flips,
+  fabricated headers, payload mutations with recomputed CRCs) and by the C API
+  fuzzer, which cannot see inside the Pascal code. The entropy coder, where the
+  bugs were, is covered. A sanitiser build of the Pascal side would close the
+  gap.
+- **Small files.** A stream header plus one block header is 36 bytes, so a tiny
+  file grows slightly. The 64 KiB minimum block also means the encoder does not
+  build a suffix array for less than that. Acceptable for a text compressor, not
+  for an archive of many tiny files.
+- **BLAKE3 digest.** An optional 128-bit BLAKE3 digest of the uncompressed data
+  would give a stronger declared integrity check than CRC-32C, but it travels in
+  the file and therefore cannot stop a deliberate forgery; it is not implemented.
+- **Targets.** ARMv7 was dropped by decision, macOS x86-64 is not built, and
+  Windows binaries are cross-compiled here and validated in VMs rather than by
+  CI.
 
 ## 5. Licence hygiene
 
-No code is taken from bzip3 (LGPL-3.0), PArc (GPL-2.0) or the lpaq-derived
-context-mixing unit. The algorithms (LZP, BWT, MTF, RLE, rANS) are classic and
-unencumbered; reference implementations that may be read for behaviour are
-public domain or permissively licensed (libsais is Apache-2.0 WITH
-LLVM-exception, ryg_rans is public domain, bzip2 is BSD-like). The code here is
-written from scratch and released under MIT.
+No code is taken from bzip3 (LGPL-3.0) or the lpaq-derived context-mixing unit
+that was only measured. The BWT comes from libsais and the entropy coder from
+libbsc, both Apache-2.0, and their local changes are listed in
+`third_party/*/README.md`. The rest is written from scratch and released under
+MIT; the format is specified in `docs/FORMAT.md` so another implementation can
+read it without copying code.

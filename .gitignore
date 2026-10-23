@@ -18,3 +18,9 @@ corpora/
 # Editors and OS noise
 *.swp
 .DS_Store
+
+# Test output (CI compares the uploaded artifacts, not the tree)
+hash.txt
+
+# Fuzzer regression seeds are small and part of the test suite
+!tests/fixtures/*.bin

@@ -21,7 +21,7 @@ unit tvct.lzp;
 interface
 
 const
-  LZP_MIN = 4;
+  LZP_MIN = 40;
   LZP_MAX = LZP_MIN + 254;
   LZP_ESC = 255;
   LZP_HASH_LOG = 22;

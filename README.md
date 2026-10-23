@@ -66,11 +66,12 @@ array.
 | BWT forward and inverse | done, round-trip tested |
 | LZP, MTF/RLE, rANS, format, CLI | done, end to end |
 
-First end-to-end numbers on the 85 MB text corpus, 16 MB blocks, one thread:
+Two entropy backends on the 85 MB text corpus, one thread:
 
 | | ratio | compress | decompress |
 |---|---|---|---|
-| **tovyCT** | **20.48 %** | **14.6 MB/s** | **42.4 MB/s** |
+| **tovyCT, MTF + rANS (default)** | **20.48 %** | **14.6 MB/s** | **42.4 MB/s** |
+| **tovyCT, context mixing (`--cm`)** | **17.12 %** | **7.3 MB/s** | **9.8 MB/s** |
 | bzip3 | 16.90 % | 7 MB/s | 9 MB/s |
 | xz -6 | 20.19 % | 6 MB/s | ~80 MB/s |
 | bzip2 -9 | 20.78 % | 11 MB/s | 35 MB/s |

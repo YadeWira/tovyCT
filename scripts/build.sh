@@ -30,7 +30,8 @@ mkdir -p "$OUT/tests" "$OUT/libsais" "$OUT/lib"
 # C kernels are always built: they are part of the decoder.
 CC=${CC:-cc}
 "$CC" -O3 -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
-ar rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o"
+"$CC" -O3 -c src/c/tvct_cm.c -o "$OUT/lib/tvct_cm.o"
+ar rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o" "$OUT/lib/tvct_cm.o"
 LIBS="$LIBS -Fl$(pwd)/$OUT/lib"
 
 if [ -n "$USE_LIBSAIS" ]; then

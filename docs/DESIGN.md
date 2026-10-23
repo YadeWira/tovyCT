@@ -243,9 +243,34 @@ Measured, 85 MB text corpus, one thread:
 | 2 MB | 21.25 % | 16.1 MB/s | 51.6 MB/s |
 
 Decode stage times at 8 MB blocks: inverse BWT 0.96 s, MTF/RLE 0.40 s, rANS
-0.31 s, file write 0.28 s for the whole 85 MB. The inverse BWT is still the
-largest piece; the next step for it is decoding blocks in parallel, since the
-format already makes them independent.
+0.31 s, file write 0.28 s for the whole 85 MB.
+
+### Context mixing: method 2
+
+MTF + rANS is the bzip2 architecture and lands at bzip2 plus a little, as the
+measurements showed. The coder that makes bzip3 small is context mixing on the
+BWT bytes: three bit models (order-0, previous byte, the byte before that),
+mixed with fixed weights and refined by an APM stage indexed by the bit-tree
+context and a run flag.
+
+`src/c/tvct_cm.c` implements it as a second block method, selected with `--cm`.
+It is the same model, written from the published description (bzip3 is LGPL and
+none of its code is used).
+
+| blocks | ratio | compress | decompress |
+|---|---|---|---|
+| 16 MB, CM | 17.12 % | 7.3 MB/s | 9.8 MB/s |
+| 8 MB, CM | 17.39 % | 8.0 MB/s | 10.2 MB/s |
+| 4 MB, CM | 17.88 % | 8.2 MB/s | 10.6 MB/s |
+| 8 MB, MTF + rANS | 20.48 % | 14.6 MB/s | 42.4 MB/s |
+
+So the codec now sits at bzip3's ratio (16.90 %) with slightly better speed,
+and keeps a fast mode 19 % larger but four times faster to decode. The remaining
+1.3 % gap to bzip3 is inside its coder; its LZP only shrinks this corpus by 1 %,
+so it is not the difference.
+
+The next lever for the CM mode is decode speed: the bit-serial arithmetic coder
+is the limit, not the BWT.
 
 ## 4. What is still open
 

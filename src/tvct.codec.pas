@@ -45,12 +45,17 @@ const
   DEFAULT_BLOCK_LOG = 23;
   METHOD_RAW = 0;
   METHOD_BWT = 1;
+  METHOD_CM = 2;
   CODEC_HEADER_SIZE = 8;
   BLOCK_HEADER_SIZE = 16;
   BWT_HEADER_EXTRA = 16;
   MTF_CONTEXTS = 3;
   FREQ_BYTES = MTF_CONTEXTS * MTF_SYMBOLS * 2;
   SAMPLE_RATE = 4096;
+
+var
+  { Selects the context-mixing backend (method 2) instead of MTF + rANS. }
+  CodecUseCM: Boolean = False;
 
 type
   TCodecStats = record
@@ -130,11 +135,11 @@ end;
 
 function DecompressBlock(const Payload: PByte; PayloadLen, OrigSize: Int32;
   const Freq: PInt32; BwtSize, Primary, TokenCount, NSamples: Int32;
-  const Samples: PInt32; Dst: PByte): Boolean; forward;
+  const Samples: PInt32; Dst: PByte; Method: Int32): Boolean; forward;
 
 function CompressBlock(const Src: PByte; N: Int32; Dst: PByte; DstCap: Int32;
   Samples: PInt32; out BwtSize, Primary, TokenCount, NSamples: Int32;
-  Freq: PInt32): Int32;
+  Freq: PInt32; UseCM: Boolean): Int32;
 var
   BwtBuf: PByte;
   SA: PInt32;
@@ -160,6 +165,14 @@ begin
     ProfEncBwt := ProfEncBwt + (Now - TS) * SecsPerDay; TS := Now;
     BuildSamples(SA, N, Samples, NSamples);
     ProfEncSamp := ProfEncSamp + (Now - TS) * SecsPerDay; TS := Now;
+    if UseCM then
+    begin
+      TokenCount := 0;
+      if kernel_cm_encode(BwtBuf, N, Dst, DstCap, R) = 0 then
+        Exit;
+      Result := R;
+      Exit;
+    end;
     TokenCount := MtfRleEncode(BwtBuf, N, Tokens);
     ProfEncMtf := ProfEncMtf + (Now - TS) * SecsPerDay; TS := Now;
 
@@ -187,7 +200,8 @@ begin
       GetMem(Tmp, N);
       try
         if DecompressBlock(Dst, R, N, @Freq[0], BwtSize, Primary, TokenCount,
-                           NSamples, Samples, Tmp) then
+                           NSamples, Samples, Tmp,
+                           Ord(UseCM) + 1) then
         begin
           i := 0;
           while (i < N) and (Tmp[i] = Src[i]) do Inc(i);
@@ -211,17 +225,34 @@ end;
 
 function DecompressBlock(const Payload: PByte; PayloadLen, OrigSize: Int32;
   const Freq: PInt32; BwtSize, Primary, TokenCount, NSamples: Int32;
-  const Samples: PInt32; Dst: PByte): Boolean;
+  const Samples: PInt32; Dst: PByte; Method: Int32): Boolean;
 var
   Tokens: PWord;
   BwtBuf: PByte;
   T0: TDateTime;
 begin
   Result := False;
-  if (BwtSize <= 0) or (BwtSize > OrigSize) or (TokenCount <= 0) or
-     (TokenCount > BwtSize) then
+  if (BwtSize <= 0) or (BwtSize > OrigSize) then
     Exit;
   if NSamples <> (BwtSize + SAMPLE_RATE - 1) div SAMPLE_RATE then
+    Exit;
+
+  if Method = METHOD_CM then
+  begin
+    GetMem(BwtBuf, BwtSize + 1);
+    try
+      if kernel_cm_decode(Payload, PayloadLen, BwtSize, BwtBuf) = 0 then
+        Exit;
+      kernel_bwt_inverse(BwtBuf, BwtSize, Primary, Samples, NSamples,
+                         SAMPLE_RATE, Dst);
+      Result := BwtSize = OrigSize;
+    finally
+      FreeMem(BwtBuf);
+    end;
+    Exit;
+  end;
+
+  if (TokenCount <= 0) or (TokenCount > BwtSize) then
     Exit;
 
   GetMem(Tokens, TokenCount * SizeOf(Word));
@@ -266,7 +297,7 @@ var
   Freq: array[0..MTF_CONTEXTS * MTF_SYMBOLS - 1] of Int32;
   Crc: LongWord;
   Raw: Boolean;
-  R, HH: Int32;
+  R, HH, Method: Int32;
 begin
   Result := False;
   Stats.InBytes := 0;
@@ -302,9 +333,12 @@ begin
       Crc := Crc32c(0, SrcBuf[0], N);
       PayloadLen := CompressBlock(SrcBuf, N, Payload, BlockSize * 2 + 64,
                                   Samples, BwtSize, Primary, TokenCount,
-                                  NSamples, @Freq[0]);
-      Raw := (PayloadLen < 0) or
-             (PayloadLen + BWT_HEADER_EXTRA + FREQ_BYTES + NSamples * 4 + 16 >= N);
+                                  NSamples, @Freq[0], CodecUseCM);
+      if CodecUseCM then
+        R := BWT_HEADER_EXTRA + NSamples * 4 + 16
+      else
+        R := BWT_HEADER_EXTRA + FREQ_BYTES + NSamples * 4 + 16;
+      Raw := (PayloadLen < 0) or (PayloadLen + R >= N);
       if Raw then
       begin
         PutU32(@Blk[0], LongWord(N));
@@ -318,9 +352,13 @@ begin
       end
       else
       begin
+        if CodecUseCM then
+          Method := METHOD_CM
+        else
+          Method := METHOD_BWT;
         PutU32(@Blk[0], LongWord(N));
         PutU32(@Blk[4], LongWord(PayloadLen));
-        PutU32(@Blk[8], LongWord(METHOD_BWT));
+        PutU32(@Blk[8], LongWord(Method));
         PutU32(@Blk[12], Crc);
         Dst.WriteBuffer(Blk[0], BLOCK_HEADER_SIZE);
         PutU32(@Blk[0], LongWord(BwtSize));
@@ -328,12 +366,13 @@ begin
         PutU32(@Blk[8], LongWord(TokenCount));
         PutU32(@Blk[12], LongWord(NSamples));
         Dst.WriteBuffer(Blk[0], BWT_HEADER_EXTRA);
-        for i := 0 to MTF_CONTEXTS * MTF_SYMBOLS - 1 do
-        begin
-          Blk[0] := Byte(Freq[i]);
-          Blk[1] := Byte(Freq[i] shr 8);
-          Dst.WriteBuffer(Blk[0], 2);
-        end;
+        if Method = METHOD_BWT then
+          for i := 0 to MTF_CONTEXTS * MTF_SYMBOLS - 1 do
+          begin
+            Blk[0] := Byte(Freq[i]);
+            Blk[1] := Byte(Freq[i] shr 8);
+            Dst.WriteBuffer(Blk[0], 2);
+          end;
         Dst.WriteBuffer(Samples[0], NSamples * SizeOf(Int32));
         Dst.WriteBuffer(Payload[0], PayloadLen);
         Inc(Stats.OutBytes, BLOCK_HEADER_SIZE + BWT_HEADER_EXTRA + FREQ_BYTES +
@@ -409,7 +448,7 @@ begin
           Exit;
         ReadExact(Src, OutBuf, OrigSize);
       end
-      else if Method = METHOD_BWT then
+      else if (Method = METHOD_BWT) or (Method = METHOD_CM) then
       begin
         ReadExact(Src, @Blk[0], BWT_HEADER_EXTRA);
         BwtSize := Int32(GetU32(@Blk[0]));
@@ -418,11 +457,12 @@ begin
         NSamples := Int32(GetU32(@Blk[12]));
         if (NSamples <= 0) or (NSamples > MaxSamples) then
           Exit;
-        for i := 0 to MTF_CONTEXTS * MTF_SYMBOLS - 1 do
-        begin
-          ReadExact(Src, @Blk[0], 2);
-          Freq[i] := Int32(Blk[0]) or (Int32(Blk[1]) shl 8);
-        end;
+        if Method = METHOD_BWT then
+          for i := 0 to MTF_CONTEXTS * MTF_SYMBOLS - 1 do
+          begin
+            ReadExact(Src, @Blk[0], 2);
+            Freq[i] := Int32(Blk[0]) or (Int32(Blk[1]) shl 8);
+          end;
         ReadExact(Src, Samples, NSamples * SizeOf(Int32));
         if PayloadLen + OrigSize > BlockSize * 2 + 64 then
           Exit;
@@ -433,7 +473,7 @@ begin
         TStage := Now;
         if not DecompressBlock(Buf, PayloadLen, OrigSize, @Freq[0], BwtSize,
                                Primary, TokenCount, NSamples,
-                               PInt32(Samples), OutBuf) then
+                               PInt32(Samples), OutBuf, Method) then
           Exit;
         ProfMove := ProfMove + (Now - TStage) * SecsPerDay;
         TStage := Now;

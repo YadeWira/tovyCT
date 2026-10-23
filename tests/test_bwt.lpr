@@ -180,10 +180,17 @@ begin
   F := TFileStream.Create(Path, fmOpenRead);
   try
     N := 1 shl 20;
+    if F.Size < N then
+      N := F.Size;
     GetMem(Buf, N);
     GetMem(SA1, (N + 1) * SizeOf(Int32));
     GetMem(SA2, (N + 1) * SizeOf(Int32));
     F.ReadBuffer(Buf^, N);
+    if N < 2 then
+    begin
+      WriteLn('backend comparison: skipped (input too small)');
+      Exit;
+    end;
     SaisForcePascal := False;
     SaisBuildSA(Buf, N, SA1);
     SaisForcePascal := True;

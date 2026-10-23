@@ -8,7 +8,8 @@
 #   win64         Windows x86-64, XP/7 and later      build/win64/
 #   win32         Windows i386, XP/7 and later        build/win32/
 #   linux-arm64   Linux AArch64                      build/linux-arm64/
-#   linux-armv7   Linux ARMv7 (hard float)           build/linux-armv7/
+#
+# macOS AArch64 has no target: it is the host target, built on macOS (CI).
 #
 # libsais is the suffix array backend (Apache-2.0, vendored). The entropy coder
 # is libbsc's QLFC (Apache-2.0, vendored). Both are compiled by the target C/C++
@@ -39,6 +40,10 @@ case "$TARGET" in
     FPC=${FPC:-fpc}
     CFLAGS="-O3 -march=native"; [ "$PORTABLE" = 1 ] && CFLAGS="-O3"
     EXE=""; SO="libtvct.so"; OUT=build
+    if [ "$(uname -s)" = Darwin ]; then
+      SO="libtvct.dylib"
+      CFLAGS="-O3"          # Apple clang has no -march=native
+    fi
     ;;
   win64)
     CC=x86_64-w64-mingw32-gcc; CXX=x86_64-w64-mingw32-g++; AR=x86_64-w64-mingw32-ar
@@ -56,12 +61,6 @@ case "$TARGET" in
     CC=aarch64-linux-gnu-gcc; CXX=aarch64-linux-gnu-g++; AR=aarch64-linux-gnu-ar
     FPC=${FPC_ARM64:-fpc-aarch64}
     CFLAGS="-O3 -mcpu=cortex-a53"; EXE=""; SO="libtvct.so"; OUT=build/linux-arm64
-    ;;
-  linux-armv7)
-    CC=arm-linux-gnueabihf-gcc; CXX=arm-linux-gnueabihf-g++; AR=arm-linux-gnueabihf-ar
-    FPC=${FPC_ARMV7:-fpc-arm}
-    CFLAGS="-O3 -mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard"
-    EXE=""; SO="libtvct.so"; OUT=build/linux-armv7
     ;;
   *)
     echo "unknown target: $TARGET" >&2; exit 1
@@ -123,8 +122,12 @@ $FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" $LIBS -Fu"$OUT/units" -
 cp include/tvct.h "$OUT/tvct.h"
 
 if [ "$TARGET" = host ] && command -v cc >/dev/null 2>&1; then
-  cc -O2 -I"$OUT" tests/test_api.c -L"$OUT" -ltvct -Wl,-rpath,"$(pwd)/$OUT" \
-     -o "$OUT/test_api"
+  if [ "$(uname -s)" = Darwin ]; then
+    cc -O2 -I"$OUT" tests/test_api.c -L"$OUT" -ltvct -o "$OUT/test_api"
+  else
+    cc -O2 -I"$OUT" tests/test_api.c -L"$OUT" -ltvct -Wl,-rpath,"$(pwd)/$OUT" \
+       -o "$OUT/test_api"
+  fi
 fi
 
 echo "built in $OUT"

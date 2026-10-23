@@ -27,8 +27,19 @@ Supported targets:
 | Linux | AArch64 | built and tested natively in a Debian 13 VM; output is byte-identical to x86-64 |
 | Windows (7 and later) | x86-64 | built, tested in a Windows 10 VM (compress, verify, decompress, byte comparison) |
 | Windows (7 and later) | x86 | built, tested in a Windows 7 VM |
-| Linux | x86, ARMv7 | build target present; needs a cross Free Pascal this machine does not have |
-| macOS | AArch64 | build target present; tested in CI |
+| macOS | AArch64 | built and tested in GitHub Actions |
+
+Windows builds need the Free Pascal cross compiler and mingw-w64, which the
+hosted runners do not carry; they are built here and validated in Windows 7 and
+Windows 10 virtual machines instead.
+
+## CI
+
+`.github/workflows/ci.yml` builds and tests Linux x86-64, Linux AArch64 and
+macOS AArch64, then compares the SHA-256 of a compressed sample across the
+three jobs: the compressed output is byte-identical on every architecture. The
+three unit-test programs, the C API test and a full stream round-trip run in
+each job.
 
 ## Planned interface
 

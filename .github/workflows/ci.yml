@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Every job builds, runs the unit tests and the stream round-trip, and records
+# the SHA-256 of the compressed sample. The last job compares the three: the
+# format is supposed to produce the same bytes on every architecture.
+
+jobs:
+  linux-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fpc
+      - name: Build
+        run: ./scripts/build.sh --libsais
+      - name: Test
+        run: sh .github/test.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hash-linux-x64
+          path: hash.txt
+
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fpc
+      - name: Build
+        run: ./scripts/build.sh --libsais
+      - name: Test
+        run: sh .github/test.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hash-linux-arm64
+          path: hash.txt
+
+  macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal
+        run: brew install fpc
+      - name: Build
+        run: ./scripts/build.sh --libsais
+      - name: Test
+        run: sh .github/test.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hash-macos-arm64
+          path: hash.txt
+
+  determinism:
+    needs: [linux-x64, linux-arm64, macos-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hash-*
+          merge-multiple: false
+      - name: Compare hashes
+        run: |
+          for f in hash-*/*; do echo "$f: $(cat "$f")"; done
+          n=$(cat hash-*/* | sort -u | wc -l)
+          if [ "$n" -ne 1 ]; then
+            echo "compressed output differs between platforms" >&2
+            exit 1
+          fi
+          echo "same bytes on every platform"

@@ -8,6 +8,7 @@ program test_codec;
 
 uses
   Classes, SysUtils, tvct.codec;
+{$I tvct.wincrt.inc}
 
 var
   Failures: Integer = 0;

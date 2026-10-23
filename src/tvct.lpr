@@ -18,6 +18,8 @@ uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
   Classes, SysUtils, DateUtils, tvct.codec, tvct.host;
 
+{$I tvct.wincrt.inc}
+
 var
   Quiet: Boolean = False;
   Threads: Int32 = -1;   { -1: decide from the CPU count }

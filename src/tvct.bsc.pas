@@ -12,7 +12,7 @@ unit tvct.bsc;
 
 {$mode objfpc}{$H+}
 {$LINKLIB bsc}
-{$LINKLIB stdc++}
+{$IFDEF UNIX}{$LINKLIB stdc++}{$ENDIF}
 {$IFDEF UNIX}{$LINKLIB c}{$ENDIF}
 
 interface

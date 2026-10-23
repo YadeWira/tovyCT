@@ -21,11 +21,14 @@ speed.
 
 Supported targets:
 
-| OS | Architectures |
-|---|---|
-| Linux | x86, x86-64, ARMv7, AArch64 |
-| Windows (7 and later) | x86, x86-64 |
-| macOS | AArch64 |
+| OS | Architectures | State |
+|---|---|---|
+| Linux | x86-64 | built and tested on the host |
+| Linux | AArch64 | built and tested natively in a Debian 13 VM; output is byte-identical to x86-64 |
+| Windows (7 and later) | x86-64 | built, tested in a Windows 10 VM (compress, verify, decompress, byte comparison) |
+| Windows (7 and later) | x86 | built, tested in a Windows 7 VM |
+| Linux | x86, ARMv7 | build target present; needs a cross Free Pascal this machine does not have |
+| macOS | AArch64 | build target present; tested in CI |
 
 ## Planned interface
 

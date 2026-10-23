@@ -8,6 +8,7 @@ program test_sais;
 
 uses
   Classes, SysUtils, DateUtils, tvct.sais;
+{$I tvct.wincrt.inc}
 
 var
   Failures: Integer = 0;

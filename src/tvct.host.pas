@@ -45,7 +45,6 @@ begin
 end;
 {$ELSE}
 {$IFDEF WINDOWS}
-function CpuCount: Int32;
 type
   TSystemInfo = record
     ProcessorArchitecture: Word;
@@ -60,6 +59,11 @@ type
     ProcessorLevel: Word;
     ProcessorRevision: Word;
   end;
+
+procedure GetSystemInfo(var Info: TSystemInfo); stdcall; external 'kernel32'
+  name 'GetSystemInfo';
+
+function CpuCount: Int32;
 var
   Info: TSystemInfo;
 begin

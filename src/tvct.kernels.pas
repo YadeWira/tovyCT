@@ -9,6 +9,7 @@ unit tvct.kernels;
 
 {$mode objfpc}{$H+}
 {$LINKLIB tvctkern}
+{$IFDEF WINDOWS}{$LINKLIB msvcrt}{$ENDIF}
 
 interface
 

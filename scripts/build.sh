@@ -1,77 +1,130 @@
 #!/bin/sh
-# Builds tovyCT's tests (and, later, the CLI).
+# Builds tovyCT.
 #
-#   scripts/build.sh             pure Pascal suffix array
-#   scripts/build.sh --libsais   vendor libsais as an optional accelerator
-#   scripts/build.sh --debug     -O1 with line info
+#   scripts/build.sh [--target NAME] [--libsais] [--portable] [--debug]
 #
-# libsais is compiled by the host C compiler; the archive format is identical
-# either way, because the Pascal code computes the BWT from the suffix array.
+# Targets:
+#   host          this machine (default)              build/
+#   win64         Windows x86-64, XP/7 and later      build/win64/
+#   win32         Windows i386, XP/7 and later        build/win32/
+#   linux-arm64   Linux AArch64                      build/linux-arm64/
+#   linux-armv7   Linux ARMv7 (hard float)           build/linux-armv7/
+#
+# libsais is the suffix array backend (Apache-2.0, vendored). The entropy coder
+# is libbsc's QLFC (Apache-2.0, vendored). Both are compiled by the target C/C++
+# compiler; the Pascal side is built by Free Pascal, cross where needed.
 set -e
 cd "$(dirname "$0")/.."
 
-OUT=build
+TARGET=host
+USE_LIBSAIS=0
+DEBUG=0
+PORTABLE=0
 
-DEFS=""
-LIBS=""
-# Native code generation by default; pass --portable for a generic binary.
-CFLAGS="-O3 -march=native"
-OPT="-O3"
-MODE=""
-
-for arg in "$@"; do
-  case "$arg" in
-    --libsais) USE_LIBSAIS=1 ;;
-    --debug)   OPT="-O1"; MODE="-g -gl"; OUT=build/dbg; CFLAGS="-O1 -g" ;;
-    --portable) CFLAGS="-O3" ;;
-    *) echo "unknown option: $arg" >&2; exit 1 ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --target) TARGET="$2"; shift 2 ;;
+    --libsais) USE_LIBSAIS=1; shift ;;
+    --debug) DEBUG=1; shift ;;
+    --portable) PORTABLE=1; shift ;;
+    *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
-mkdir -p "$OUT/tests" "$OUT/libsais" "$OUT/lib" "$OUT/bsc"
+FPC_CROSS=${FPC_CROSS:-/mnt/IA_LAB/compartido/parc/fpc-cross/bin}
 
-# libbsc coder (Apache-2.0), the entropy backend.
-BSC="$(pwd)/third_party/libbsc/src"
-g++ $CFLAGS -c "$BSC/coder/coder.cpp" -o "$OUT/bsc/coder.o"
-g++ $CFLAGS -c "$BSC/coder/qlfc/qlfc.cpp" -o "$OUT/bsc/qlfc.o"
-g++ $CFLAGS -c "$BSC/coder/qlfc/qlfc_model.cpp" -o "$OUT/bsc/qlfc_model.o"
-g++ $CFLAGS -c "$BSC/platform/platform.cpp" -o "$OUT/bsc/platform.o"
-g++ $CFLAGS -c "$BSC/adler32/adler32.cpp" -o "$OUT/bsc/adler32.o"
-ar rcs "$OUT/bsc/libbsc.a" "$OUT/bsc/coder.o" "$OUT/bsc/qlfc.o" "$OUT/bsc/qlfc_model.o" "$OUT/bsc/platform.o" "$OUT/bsc/adler32.o"
-LIBS="$LIBS -Fl$(pwd)/$OUT/bsc"
+case "$TARGET" in
+  host)
+    CC=${CC:-cc}; CXX=${CXX:-c++}; AR=${AR:-ar}
+    FPC=${FPC:-fpc}
+    CFLAGS="-O3 -march=native"; [ "$PORTABLE" = 1 ] && CFLAGS="-O3"
+    EXE=""; SO="libtvct.so"; OUT=build
+    ;;
+  win64)
+    CC=x86_64-w64-mingw32-gcc; CXX=x86_64-w64-mingw32-g++; AR=x86_64-w64-mingw32-ar
+    FPC="$FPC_CROSS/fpc-win64"
+    CFLAGS="-O3 -DTVCT_PORTABLE"; EXE=".exe"; SO="tvct.dll"; OUT=build/win64
+    WINLIB="/usr/x86_64-w64-mingw32/lib $(ls -d /usr/lib/gcc/x86_64-w64-mingw32/*/ | head -1)"
+    ;;
+  win32)
+    CC=i686-w64-mingw32-gcc; CXX=i686-w64-mingw32-g++; AR=i686-w64-mingw32-ar
+    FPC="$FPC_CROSS/fpc-win32"
+    CFLAGS="-O3 -DTVCT_PORTABLE"; EXE=".exe"; SO="tvct.dll"; OUT=build/win32
+    WINLIB="/usr/i686-w64-mingw32/lib $(ls -d /usr/lib/gcc/i686-w64-mingw32/*/ | head -1)"
+    ;;
+  linux-arm64)
+    CC=aarch64-linux-gnu-gcc; CXX=aarch64-linux-gnu-g++; AR=aarch64-linux-gnu-ar
+    FPC=${FPC_ARM64:-fpc-aarch64}
+    CFLAGS="-O3 -mcpu=cortex-a53"; EXE=""; SO="libtvct.so"; OUT=build/linux-arm64
+    ;;
+  linux-armv7)
+    CC=arm-linux-gnueabihf-gcc; CXX=arm-linux-gnueabihf-g++; AR=arm-linux-gnueabihf-ar
+    FPC=${FPC_ARMV7:-fpc-arm}
+    CFLAGS="-O3 -mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard"
+    EXE=""; SO="libtvct.so"; OUT=build/linux-armv7
+    ;;
+  *)
+    echo "unknown target: $TARGET" >&2; exit 1
+    ;;
+esac
 
-# C kernels are always built: they are part of the decoder.
-CC=${CC:-cc}
-"$CC" $CFLAGS -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
-ar rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o"
+if [ "$DEBUG" = 1 ]; then
+  FPCOPT="-O1"; MODE="-g -gl"; CFLAGS="-O1 -g"
+else
+  FPCOPT="-O3"; MODE=""
+fi
+
+DEFS=""
+LIBS=""
+for d in $WINLIB; do
+  LIBS="$LIBS -Fl$d"
+done
+mkdir -p "$OUT/tests" "$OUT/lib" "$OUT/bsc" "$OUT/libsais" "$OUT/units"
+
+# C kernels: decode paths.
+$CC $CFLAGS -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
+$AR rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o"
 LIBS="$LIBS -Fl$(pwd)/$OUT/lib"
 
-if [ -n "$USE_LIBSAIS" ]; then
-  CC=${CC:-cc}
-  "$CC" $CFLAGS -c third_party/libsais/libsais.c -o "$OUT/libsais/libsais.o"
-  ar rcs "$OUT/libsais/libsais.a" "$OUT/libsais/libsais.o"
+# libbsc coder (C++), the entropy backend.
+BSC="$(pwd)/third_party/libbsc/src"
+$CXX $CFLAGS -c "$BSC/coder/coder.cpp" -o "$OUT/bsc/coder.o"
+$CXX $CFLAGS -c "$BSC/coder/qlfc/qlfc.cpp" -o "$OUT/bsc/qlfc.o"
+$CXX $CFLAGS -c "$BSC/coder/qlfc/qlfc_model.cpp" -o "$OUT/bsc/qlfc_model.o"
+$CXX $CFLAGS -c "$BSC/platform/platform.cpp" -o "$OUT/bsc/platform.o"
+$CXX $CFLAGS -c "$BSC/adler32/adler32.cpp" -o "$OUT/bsc/adler32.o"
+$AR rcs "$OUT/bsc/libbsc.a" "$OUT/bsc/coder.o" "$OUT/bsc/qlfc.o" \
+    "$OUT/bsc/qlfc_model.o" "$OUT/bsc/platform.o" "$OUT/bsc/adler32.o"
+LIBS="$LIBS -Fl$(pwd)/$OUT/bsc"
+
+if [ "$USE_LIBSAIS" = 1 ]; then
+  $CC $CFLAGS -c third_party/libsais/libsais.c -o "$OUT/libsais/libsais.o"
+  $AR rcs "$OUT/libsais/libsais.a" "$OUT/libsais/libsais.o"
   DEFS="-dTVCT_LIBSAIS"
   LIBS="$LIBS -Fl$(pwd)/$OUT/libsais"
   echo "libsais: $OUT/libsais/libsais.a"
+else
+  echo "warning: no libsais; the suffix array falls back to the Pascal SA-IS" >&2
 fi
 
-mkdir -p "$OUT/tests"
 for t in tests/test_sais.lpr tests/test_bwt.lpr tests/test_codec.lpr; do
   echo "== $t"
-  fpc $OPT $MODE -Mobjfpc $DEFS -Fusrc $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
+  $FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
       -FE"$OUT/tests" "$t"
 done
 
 echo "== tvct"
-fpc $OPT $MODE -Mobjfpc $DEFS -Fusrc $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
+$FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
     -FE"$OUT" src/tvct.lpr
 
-echo "== libtvct"
-mkdir -p "$OUT/units"
-fpc $OPT $MODE -Mobjfpc $DEFS -Fusrc $LIBS -Fu"$OUT/units" -FU"$OUT/units" \
-    -o"$OUT/libtvct.so" src/tvct.api.lpr
+echo "== $SO"
+$FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" $LIBS -Fu"$OUT/units" -FU"$OUT/units" \
+    -o"$OUT/$SO" src/tvct.api.lpr
 cp include/tvct.h "$OUT/tvct.h"
-if command -v cc >/dev/null 2>&1; then
+
+if [ "$TARGET" = host ] && command -v cc >/dev/null 2>&1; then
   cc -O2 -I"$OUT" tests/test_api.c -L"$OUT" -ltvct -Wl,-rpath,"$(pwd)/$OUT" \
      -o "$OUT/test_api"
 fi
+
+echo "built in $OUT"

@@ -9,6 +9,7 @@ program test_bwt;
 
 uses
   Classes, SysUtils, DateUtils, tvct.sais, tvct.bwt;
+{$I tvct.wincrt.inc}
 
 var
   Failures: Integer = 0;

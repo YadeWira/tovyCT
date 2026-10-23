@@ -38,7 +38,7 @@ See also the bsc and libbsc web site:
 
 #include "../libbsc.h"
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(TVCT_PORTABLE)
   #include <windows.h>
   SIZE_T bsc_LargePageSize = 0;
 #endif
@@ -125,7 +125,7 @@ int bsc_get_cpu_features(void)
 
 static void * bsc_default_malloc(size_t size)
 {
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(TVCT_PORTABLE)
     if ((bsc_LargePageSize != 0) && (size >= 256 * 1024))
     {
         void * address = VirtualAlloc(0, (size + bsc_LargePageSize - 1) & (~(bsc_LargePageSize - 1)), MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE);
@@ -139,7 +139,7 @@ static void * bsc_default_malloc(size_t size)
 
 static void * bsc_default_zero_malloc(size_t size)
 {
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(TVCT_PORTABLE)
     if ((bsc_LargePageSize != 0) && (size >= 256 * 1024))
     {
         void * address = VirtualAlloc(0, (size + bsc_LargePageSize - 1) & (~(bsc_LargePageSize - 1)), MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE);
@@ -163,7 +163,7 @@ static void * bsc_wrap_zero_malloc(size_t size)
 
 static void bsc_default_free(void * address)
 {
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(TVCT_PORTABLE)
     VirtualFree(address, 0, MEM_RELEASE);
 #else
     free(address);
@@ -214,7 +214,7 @@ int bsc_platform_init(int features, void* (* malloc)(size_t size), void* (* zero
 	bsc_free_fn = free;
     }
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(TVCT_PORTABLE)
 
     if (features & LIBBSC_FEATURE_LARGEPAGES)
     {

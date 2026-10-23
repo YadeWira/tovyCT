@@ -15,6 +15,8 @@ uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
   Classes, SysUtils, tvct.codec, tvct.host;
 
+{$I tvct.wincrt.inc}
+
 type
   TBufferStream = class(TStream)
   private

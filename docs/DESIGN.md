@@ -142,17 +142,34 @@ Throughput on the same machine, single thread:
 | 16 MB | 5.6 MB/s | 20.3 MB/s |
 
 The gap is about 4x. libsais is the state of the art and is what `bz2-ng` links.
-The Int32 work array costs 4 bytes per input byte; a byte-level rewrite (8-bit
-symbols, fewer passes, prefetching) is the next step and should recover a good
-part of the gap.
+
+A byte-level rewrite was then measured (input read directly, no widened copy):
+7.7 MB/s at 1 MB and 6.2 MB/s at 16 MB, and 9.8 MB/s even at 64 KB blocks. The
+copy was not the bottleneck: the limit is the dependency chain of random accesses
+inside the induced-sorting loops and the branch misses they cause (perf: 0.80
+instructions per cycle, 200 M cache misses and 179 M branch misses over the run).
+Closing the remaining 3x would mean restructuring the passes the way libsais
+does, which is a project of its own.
 
 The reference row also sets the ceiling honestly: on this CPU even libsais builds
 a 16 MB suffix array at 20 MB/s, so a BWT codec in C would compress at roughly
 15 MB/s here. The 66 MB/s figure `bz2-ng` reports comes from newer CPUs.
 
-This means the compression-speed targets above are too optimistic for this
-machine and are being re-baselined in M1. Decompression is unaffected: it does
-not build suffix arrays.
+This means the compression-speed targets above are too optimistic: with an 8 MB/s
+suffix array and a pipeline that costs 1.5-2x, compression lands at 4-6 MB/s,
+below bzip3 (7) and xz (6). Decompression is unaffected: it does not build suffix
+arrays, so the 200+ MB/s target stands.
+
+The two ways out, to be decided before M1 continues:
+
+- **Optional libsais.** Vendor libsais (Apache-2.0 WITH LLVM-exception, MIT
+  compatible, the same arrangement `bz2-ng` uses), keep the pure-Pascal SA as the
+  default fallback, and let a build flag select the C one. Everything else — the
+  format, LZP, BWT wiring, MTF/RLE, rANS, inverse BWT, CLI, C API — stays Pascal
+  and assembly. Compression moves to an estimated 10-15 MB/s.
+- **Go back to LZ.** The measured LZ+rANS model gives 23.5 % at an estimated
+  15-25 MB/s in Pascal, with 400+ MB/s decode. Worse ratio than BWT by 25 %,
+  better compression speed by 2-4x.
 
 ### Assembly kernels
 

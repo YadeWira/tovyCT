@@ -165,7 +165,7 @@ var
   Total: SizeInt;
   Buf: PByte;
   SA: PInt32;
-  BlockSizes: array[0..3] of SizeInt = (1 shl 20, 4 shl 20, 8 shl 20, 16 shl 20);
+  BlockSizes: array[0..6] of SizeInt = (64 shl 10, 256 shl 10, 512 shl 10, 1 shl 20, 4 shl 20, 8 shl 20, 16 shl 20);
   b, off, Len: SizeInt;
   t0: TDateTime;
   Secs, MBps: Double;
@@ -192,8 +192,8 @@ begin
       if Secs <= 0 then
         Secs := 1e-9;
       MBps := (off / 1e6) / Secs;
-      WriteLn(Format('  block %2d MB: %6.1f MB/s  (%d MB processed)',
-        [BlockSizes[b] shr 20, MBps, off shr 20]));
+      WriteLn(Format('  block %4d KB: %6.1f MB/s  (%d MB processed)',
+        [BlockSizes[b] shr 10, MBps, off shr 20]));
       { spot-check the last block }
       Check(ValidateSA(Buf + off - BlockSizes[b], BlockSizes[b], SA), 'validate');
     end;

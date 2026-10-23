@@ -8,22 +8,21 @@
   The implementation is written from the published algorithm. It is not derived
   from libsais, divsufsort or any other implementation.
 
-  Bytes are mapped to 1..256 and a 0 sentinel is appended, so the alphabet is 257
-  symbols and the sentinel is unique and smallest, as the algorithm requires.
-  For one 16 MB block that costs a 64 MB work array; the byte-level variant that
-  avoids it is a later optimisation.
+  The top level works directly on the input bytes: the sentinel is a virtual
+  position past the end, so no widened copy of the input is needed. The reduced
+  problems of the recursion use Int32 symbols, because their alphabet can exceed
+  256.
+
+  SA must have room for N+1 Int32: the algorithm sorts N+1 suffixes (including
+  the sentinel) and drops the first one before returning.
 }
 unit tvct.sais;
 
 {$mode objfpc}{$H+}
-{$POINTERMATH ON}
 {$R-}{$Q-}
 
 interface
 
-{ Builds the suffix array of T[0..N-1] into SA[0..N-1]. T must not be nil when
-  N > 0; SA must have room for N+1 Int32, because the sentinel needs one extra
-  slot before it is dropped. N = 0 writes nothing. }
 procedure SaisBuildSA(const T: PByte; N: SizeInt; SA: PInt32);
 
 implementation
@@ -32,71 +31,65 @@ type
   PInt32Arr = ^Int32;
 
 const
-  SENTINEL_ALPHABET = 257;   { bytes 1..256 plus the 0 sentinel }
+  { bytes map to 1..256; 0 is the sentinel }
+  BYTE_ALPHABET = 257;
 
-function IsLMS(const t: PByte; i: Int32): Boolean; inline;
+function IsLMS(const Typ: PByte; i, Sentinel: Int32): Boolean; inline;
 begin
-  Result := (i > 0) and (t[i] <> 0) and (t[i - 1] = 0);
+  if i <= 0 then
+    Exit(False);
+  if i = Sentinel then
+    Exit(True);
+  Result := (Typ[i] <> 0) and (Typ[i - 1] = 0);
 end;
 
-procedure GetBuckets(const S: PInt32; Bkt: PInt32; N, K: Int32; EndPos: Boolean);
+{ Recompute bucket boundaries from a saved symbol count. }
+procedure BucketsFromCounts(const Cnt, Bkt: PInt32; K: Int32; EndPos: Boolean);
 var
   i, Sum: Int32;
 begin
-  for i := 0 to K - 1 do
-    Bkt[i] := 0;
-  for i := 0 to N - 1 do
-    Inc(Bkt[S[i]]);
   Sum := 0;
   for i := 0 to K - 1 do
   begin
-    Sum := Sum + Bkt[i];
+    Sum := Sum + Cnt[i];
     if EndPos then
       Bkt[i] := Sum
     else
-      Bkt[i] := Sum - Bkt[i];
+      Bkt[i] := Sum - Cnt[i];
   end;
 end;
 
-procedure InduceSAl(const t: PByte; SA, S, Bkt: PInt32; N, K: Int32);
+procedure CountBucketsInt(const S: PInt32; Cnt: PInt32; N, K: Int32);
 var
-  i, c, j: Int32;
+  i: Int32;
 begin
-  GetBuckets(S, Bkt, N, K, False);
+  for i := 0 to K - 1 do
+    Cnt[i] := 0;
   for i := 0 to N - 1 do
-  begin
-    c := SA[i];
-    if (c > 0) and (t[c - 1] = 0) then
-    begin
-      j := S[c - 1];
-      SA[Bkt[j]] := c - 1;
-      Inc(Bkt[j]);
-    end;
-  end;
+    Inc(Cnt[S[i]]);
 end;
 
-procedure InduceSAs(const t: PByte; SA, S, Bkt: PInt32; N, K: Int32);
+procedure CountBucketsByte(const T: PByte; Cnt: PInt32; N: Int32);
 var
-  i, c, j: Int32;
+  i: Int32;
 begin
-  GetBuckets(S, Bkt, N, K, True);
-  for i := N - 1 downto 0 do
-  begin
-    c := SA[i];
-    if (c > 0) and (t[c - 1] <> 0) then
-    begin
-      j := S[c - 1];
-      Dec(Bkt[j]);
-      SA[Bkt[j]] := c - 1;
-    end;
-  end;
+  for i := 0 to BYTE_ALPHABET - 1 do
+    Cnt[i] := 0;
+  Inc(Cnt[0]);                       { the sentinel }
+  for i := 0 to N - 1 do
+    Inc(Cnt[T[i] + 1]);
 end;
+
+{ ---------------------------------------------------------------------------
+  Int32 core, used for the reduced problems of the recursion. S[N-1] is the
+  unique smallest symbol (0), as the algorithm requires.
+  --------------------------------------------------------------------------- }
 
 procedure SaisRec(const S: PInt32; SA: PInt32; N, K: Int32);
 var
-  t: PByte;
-  Bkt: PInt32;
-  n1, i, j, Name, Prev, Pos, d: Int32;
+  Typ: PByte;
+  Cnt, Bkt: PInt32;
+  n1, i, j, Name, Prev, Pos, d, c: Int32;
   Diff: Boolean;
   SA1, s1: PInt32;
 begin
@@ -106,41 +99,63 @@ begin
     Exit;
   end;
 
-  GetMem(t, N);
+  GetMem(Typ, N);
+  GetMem(Cnt, K * SizeOf(Int32));
   GetMem(Bkt, K * SizeOf(Int32));
   try
-    { 1. Classify L/S. The last character is the sentinel: S-type. }
-    t[N - 1] := 1;
-    t[N - 2] := 0;
+    Typ[N - 1] := 1;
+    Typ[N - 2] := 0;
     for i := N - 3 downto 0 do
-      if (S[i] < S[i + 1]) or ((S[i] = S[i + 1]) and (t[i + 1] <> 0)) then
-        t[i] := 1
+      if (S[i] < S[i + 1]) or ((S[i] = S[i + 1]) and (Typ[i + 1] <> 0)) then
+        Typ[i] := 1
       else
-        t[i] := 0;
+        Typ[i] := 0;
 
-    { 2. Place LMS suffixes at the end of their buckets and induce. }
+    CountBucketsInt(S, Cnt, N, K);
+
     for i := 0 to N - 1 do
       SA[i] := -1;
-    GetBuckets(S, Bkt, N, K, True);
+    BucketsFromCounts(Cnt, Bkt, K, True);
     for i := 1 to N - 1 do
-      if IsLMS(t, i) then
+      if IsLMS(Typ, i, N - 1) then
       begin
         Dec(Bkt[S[i]]);
         SA[Bkt[S[i]]] := i;
       end;
-    InduceSAl(t, SA, S, Bkt, N, K);
-    InduceSAs(t, SA, S, Bkt, N, K);
 
-    { 3. Compact the sorted LMS suffixes into the head of SA. }
+    { induce L }
+    BucketsFromCounts(Cnt, Bkt, K, False);
+    for i := 0 to N - 1 do
+    begin
+      c := SA[i];
+      if (c > 0) and (Typ[c - 1] = 0) then
+      begin
+        j := S[c - 1];
+        SA[Bkt[j]] := c - 1;
+        Inc(Bkt[j]);
+      end;
+    end;
+    { induce S }
+    BucketsFromCounts(Cnt, Bkt, K, True);
+    for i := N - 1 downto 0 do
+    begin
+      c := SA[i];
+      if (c > 0) and (Typ[c - 1] <> 0) then
+      begin
+        j := S[c - 1];
+        Dec(Bkt[j]);
+        SA[Bkt[j]] := c - 1;
+      end;
+    end;
+
     n1 := 0;
     for i := 0 to N - 1 do
-      if IsLMS(t, SA[i]) then
+      if IsLMS(Typ, SA[i], N - 1) then
       begin
         SA[n1] := SA[i];
         Inc(n1);
       end;
 
-    { 4. Name the sorted LMS substrings. }
     for i := n1 to N - 1 do
       SA[i] := -1;
     Name := 0;
@@ -156,12 +171,12 @@ begin
         d := 0;
         while d < N do
         begin
-          if (S[Pos + d] <> S[Prev + d]) or (t[Pos + d] <> t[Prev + d]) then
+          if (S[Pos + d] <> S[Prev + d]) or (Typ[Pos + d] <> Typ[Prev + d]) then
           begin
             Diff := True;
             Break;
           end
-          else if (d > 0) and (IsLMS(t, Pos + d) or IsLMS(t, Prev + d)) then
+          else if (d > 0) and (IsLMS(Typ, Pos + d, N - 1) or IsLMS(Typ, Prev + d, N - 1)) then
             Break;
           Inc(d);
         end;
@@ -174,7 +189,6 @@ begin
       SA[n1 + (Pos shr 1)] := Name - 1;
     end;
 
-    { 5. Compact the names to the tail of SA: that is s1. }
     j := N - 1;
     for i := N - 1 downto n1 do
       if SA[i] >= 0 then
@@ -183,7 +197,6 @@ begin
         Dec(j);
       end;
 
-    { 6. Recurse on the reduced string, or sort directly if names are unique. }
     SA1 := SA;
     s1 := @SA[N - n1];
     if Name < n1 then
@@ -192,11 +205,10 @@ begin
       for i := 0 to n1 - 1 do
         SA1[s1[i]] := i;
 
-    { 7. Induce the final suffix array from the sorted LMS suffixes. }
-    GetBuckets(S, Bkt, N, K, True);
+    BucketsFromCounts(Cnt, Bkt, K, True);
     j := 0;
     for i := 1 to N - 1 do
-      if IsLMS(t, i) then
+      if IsLMS(Typ, i, N - 1) then
       begin
         s1[j] := i;
         Inc(j);
@@ -212,18 +224,227 @@ begin
       Dec(Bkt[S[j]]);
       SA[Bkt[S[j]]] := j;
     end;
-    InduceSAl(t, SA, S, Bkt, N, K);
-    InduceSAs(t, SA, S, Bkt, N, K);
+
+    BucketsFromCounts(Cnt, Bkt, K, False);
+    for i := 0 to N - 1 do
+    begin
+      c := SA[i];
+      if (c > 0) and (Typ[c - 1] = 0) then
+      begin
+        j := S[c - 1];
+        SA[Bkt[j]] := c - 1;
+        Inc(Bkt[j]);
+      end;
+    end;
+    BucketsFromCounts(Cnt, Bkt, K, True);
+    for i := N - 1 downto 0 do
+    begin
+      c := SA[i];
+      if (c > 0) and (Typ[c - 1] <> 0) then
+      begin
+        j := S[c - 1];
+        Dec(Bkt[j]);
+        SA[Bkt[j]] := c - 1;
+      end;
+    end;
   finally
     FreeMem(Bkt);
-    FreeMem(t);
+    FreeMem(Cnt);
+    FreeMem(Typ);
+  end;
+end;
+
+{ ---------------------------------------------------------------------------
+  Byte-level top level. L data bytes, one virtual sentinel at position L.
+  --------------------------------------------------------------------------- }
+
+procedure SaisTopByte(const T: PByte; L: Int32; SA: PInt32);
+var
+  Typ: PByte;
+  Cnt, Bkt: PInt32;
+  M, n1, i, j, Name, Prev, Pos, d, c: Int32;
+  Diff: Boolean;
+  SA1, s1: PInt32;
+begin
+  M := L + 1;                        { positions 0..L, sentinel at L }
+
+  GetMem(Typ, M);
+  GetMem(Cnt, BYTE_ALPHABET * SizeOf(Int32));
+  GetMem(Bkt, BYTE_ALPHABET * SizeOf(Int32));
+  try
+    Typ[M - 1] := 1;
+    Typ[M - 2] := 0;
+    for i := M - 3 downto 0 do
+      if (T[i] < T[i + 1]) or ((T[i] = T[i + 1]) and (Typ[i + 1] <> 0)) then
+        Typ[i] := 1
+      else
+        Typ[i] := 0;
+
+    CountBucketsByte(T, Cnt, L);
+
+    for i := 0 to M - 1 do
+      SA[i] := -1;
+    BucketsFromCounts(Cnt, Bkt, BYTE_ALPHABET, True);
+    for i := 1 to M - 1 do
+      if IsLMS(Typ, i, L) then
+        if i = L then
+        begin
+          Dec(Bkt[0]);
+          SA[Bkt[0]] := L;
+        end
+        else
+        begin
+          Dec(Bkt[T[i] + 1]);
+          SA[Bkt[T[i] + 1]] := i;
+        end;
+
+    { induce L }
+    BucketsFromCounts(Cnt, Bkt, BYTE_ALPHABET, False);
+    for i := 0 to M - 1 do
+    begin
+      c := SA[i];
+      if (c > 0) and (Typ[c - 1] = 0) then
+      begin
+        j := T[c - 1] + 1;
+        SA[Bkt[j]] := c - 1;
+        Inc(Bkt[j]);
+      end;
+    end;
+    { induce S }
+    BucketsFromCounts(Cnt, Bkt, BYTE_ALPHABET, True);
+    for i := M - 1 downto 0 do
+    begin
+      c := SA[i];
+      if (c > 0) and (Typ[c - 1] <> 0) then
+      begin
+        j := T[c - 1] + 1;
+        Dec(Bkt[j]);
+        SA[Bkt[j]] := c - 1;
+      end;
+    end;
+
+    n1 := 0;
+    for i := 0 to M - 1 do
+      if IsLMS(Typ, SA[i], L) then
+      begin
+        SA[n1] := SA[i];
+        Inc(n1);
+      end;
+
+    for i := n1 to M - 1 do
+      SA[i] := -1;
+    Name := 0;
+    Prev := -1;
+    for i := 0 to n1 - 1 do
+    begin
+      Pos := SA[i];
+      Diff := False;
+      if Prev < 0 then
+        Diff := True
+      else
+      begin
+        d := 0;
+        while d < M do
+        begin
+          { the sentinel position is unique and sorts first }
+          if (Pos + d = L) or (Prev + d = L) then
+          begin
+            Diff := True;
+            Break;
+          end;
+          if (T[Pos + d] <> T[Prev + d]) or (Typ[Pos + d] <> Typ[Prev + d]) then
+          begin
+            Diff := True;
+            Break;
+          end
+          else if (d > 0) and (IsLMS(Typ, Pos + d, L) or IsLMS(Typ, Prev + d, L)) then
+            Break;
+          Inc(d);
+        end;
+      end;
+      if Diff then
+      begin
+        Inc(Name);
+        Prev := Pos;
+      end;
+      SA[n1 + (Pos shr 1)] := Name - 1;
+    end;
+
+    j := M - 1;
+    for i := M - 1 downto n1 do
+      if SA[i] >= 0 then
+      begin
+        SA[j] := SA[i];
+        Dec(j);
+      end;
+
+    SA1 := SA;
+    s1 := @SA[M - n1];
+    if Name < n1 then
+      SaisRec(s1, SA1, n1, Name)
+    else
+      for i := 0 to n1 - 1 do
+        SA1[s1[i]] := i;
+
+    BucketsFromCounts(Cnt, Bkt, BYTE_ALPHABET, True);
+    j := 0;
+    for i := 1 to M - 1 do
+      if IsLMS(Typ, i, L) then
+      begin
+        s1[j] := i;
+        Inc(j);
+      end;
+    for i := 0 to n1 - 1 do
+      SA1[i] := s1[SA1[i]];
+    for i := n1 to M - 1 do
+      SA[i] := -1;
+    for i := n1 - 1 downto 0 do
+    begin
+      j := SA[i];
+      SA[i] := -1;
+      if j = L then
+      begin
+        Dec(Bkt[0]);
+        SA[Bkt[0]] := j;
+      end
+      else
+      begin
+        Dec(Bkt[T[j] + 1]);
+        SA[Bkt[T[j] + 1]] := j;
+      end;
+    end;
+
+    { induce once more for the final order }
+    BucketsFromCounts(Cnt, Bkt, BYTE_ALPHABET, False);
+    for i := 0 to M - 1 do
+    begin
+      c := SA[i];
+      if (c > 0) and (Typ[c - 1] = 0) then
+      begin
+        j := T[c - 1] + 1;
+        SA[Bkt[j]] := c - 1;
+        Inc(Bkt[j]);
+      end;
+    end;
+    BucketsFromCounts(Cnt, Bkt, BYTE_ALPHABET, True);
+    for i := M - 1 downto 0 do
+    begin
+      c := SA[i];
+      if (c > 0) and (Typ[c - 1] <> 0) then
+      begin
+        j := T[c - 1] + 1;
+        Dec(Bkt[j]);
+        SA[Bkt[j]] := c - 1;
+      end;
+    end;
+  finally
+    FreeMem(Bkt);
+    FreeMem(Cnt);
+    FreeMem(Typ);
   end;
 end;
 
 procedure SaisBuildSA(const T: PByte; N: SizeInt; SA: PInt32);
-var
-  S: PInt32;
-  i: SizeInt;
 begin
   if N <= 0 then
     Exit;
@@ -232,19 +453,9 @@ begin
     SA[0] := 0;
     Exit;
   end;
-
-  GetMem(S, (N + 1) * SizeOf(Int32));
-  try
-    for i := 0 to N - 1 do
-      S[i] := Int32(T[i]) + 1;
-    S[N] := 0;
-    SaisRec(S, SA, Int32(N + 1), SENTINEL_ALPHABET);
-    { Drop the sentinel, which is always the first suffix. }
-    for i := 0 to N - 1 do
-      SA[i] := SA[i + 1];
-  finally
-    FreeMem(S);
-  end;
+  SaisTopByte(T, Int32(N), SA);
+  { SA[0] is the sentinel (position N); shift the result down. }
+  Move(SA[1], SA[0], N * SizeOf(Int32));
 end;
 
 end.

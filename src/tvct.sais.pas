@@ -23,7 +23,20 @@ unit tvct.sais;
 
 interface
 
+var
+  { Tests: ignore an available C backend and use the Pascal one. }
+  SaisForcePascal: Boolean = False;
+
+procedure SaisBuildSAPascal(const T: PByte; N: SizeInt; SA: PInt32);
 procedure SaisBuildSA(const T: PByte; N: SizeInt; SA: PInt32);
+
+{$IFDEF TVCT_LIBSAIS}
+{$LINKLIB libsais}
+{$IFDEF UNIX}{$LINKLIB c}{$ENDIF}
+{ Vendored libsais 2.10.4, Apache-2.0. See third_party/libsais/README.md. }
+function tvct_libsais(T: PByte; SA: PInt32; n: Int32; fs: Int32;
+  freq: PInt32): Int32; cdecl; external name 'libsais';
+{$ENDIF}
 
 implementation
 
@@ -444,7 +457,7 @@ begin
   end;
 end;
 
-procedure SaisBuildSA(const T: PByte; N: SizeInt; SA: PInt32);
+procedure SaisBuildSAPascal(const T: PByte; N: SizeInt; SA: PInt32);
 begin
   if N <= 0 then
     Exit;
@@ -456,6 +469,23 @@ begin
   SaisTopByte(T, Int32(N), SA);
   { SA[0] is the sentinel (position N); shift the result down. }
   Move(SA[1], SA[0], N * SizeOf(Int32));
+end;
+
+procedure SaisBuildSA(const T: PByte; N: SizeInt; SA: PInt32);
+begin
+  if N <= 0 then
+    Exit;
+  if N = 1 then
+  begin
+    SA[0] := 0;
+    Exit;
+  end;
+{$IFDEF TVCT_LIBSAIS}
+  if not SaisForcePascal then
+    if tvct_libsais(T, SA, Int32(N), 0, nil) >= 0 then
+      Exit;
+{$ENDIF}
+  SaisBuildSAPascal(T, N, SA);
 end;
 
 end.

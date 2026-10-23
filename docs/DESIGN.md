@@ -184,6 +184,22 @@ SA-IS stays in Pascal: it is pointer-chasing and memory-bound, and hand-written
 assembly does not pay there; the bucket-sum passes are the only vectorisable
 part.
 
+### M1 progress
+
+| piece | measured |
+|---|---|
+| suffix array, libsais (1 MB / 8 MB blocks) | 35.6 / 26.7 MB/s |
+| suffix array, pure Pascal | 8.6 / 6.4 MB/s |
+| BWT forward on top of the suffix array | adds less than 10 % |
+| BWT inverse, simple LF walk | 35.9 / 25.9 MB/s |
+
+The inverse transform is now the decode bottleneck and the next optimisation
+target. It is a single dependent chain of random reads, so its speed is one
+memory latency per byte. The fix is the one `bz2-ng` uses: the encoder records
+the row at each chunk boundary and the decoder walks several independent chains
+in parallel, which turns a serial latency chain into memory-level parallelism.
+That plan is what the assembly kernels will implement.
+
 ## 4. What is still open
 
 - **SA-IS in Pascal at speed.** The one real risk. A 16 MB block needs a

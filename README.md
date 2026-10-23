@@ -40,6 +40,32 @@ tvct b [file ...]                  benchmark
 A C header (`include/tvct.h`) and a set of Pascal units will expose the same
 codec to third-party programs.
 
+## Building
+
+Requirements: Free Pascal 3.2.2 (the current stable release) and, optionally, a C
+compiler for the libsais accelerator.
+
+```sh
+scripts/build.sh              # pure Pascal suffix array
+scripts/build.sh --libsais    # vendor libsais as an optional accelerator
+./build/tests/test_sais
+./build/tests/test_bwt corpora/text.bin
+```
+
+The archive format does not depend on which build is used: the BWT is computed
+in Pascal from the suffix array, and both suffix array backends produce the same
+array.
+
+## Status
+
+| piece | state |
+|---|---|
+| measurement model and design | done (`docs/DESIGN.md`) |
+| suffix array, SA-IS in Pascal | done, tested |
+| optional libsais accelerator | done, tested against the Pascal backend |
+| BWT forward and inverse | done, round-trip tested |
+| LZP, MTF/RLE, rANS, format, CLI | not started |
+
 ## Licence
 
 MIT. See [`LICENSE`](LICENSE).

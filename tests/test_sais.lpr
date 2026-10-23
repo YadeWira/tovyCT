@@ -206,6 +206,12 @@ end;
 
 begin
   WriteLn('SA-IS test (FPC ', {$I %FPCVERSION%}, ')');
+{$IFDEF TVCT_LIBSAIS}
+  { This test exercises the Pascal implementation, so force it even when the
+    optional C accelerator is linked. }
+  SaisForcePascal := True;
+  WriteLn('libsais linked, testing the Pascal path');
+{$ENDIF}
   TestRandom;
   TestPatterns;
   if ParamCount >= 1 then

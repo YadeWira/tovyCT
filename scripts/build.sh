@@ -11,7 +11,6 @@ set -e
 cd "$(dirname "$0")/.."
 
 OUT=build
-mkdir -p "$OUT/tests" "$OUT/libsais"
 
 DEFS=""
 LIBS=""
@@ -26,6 +25,8 @@ for arg in "$@"; do
   esac
 done
 
+mkdir -p "$OUT/tests" "$OUT/libsais"
+
 if [ -n "$USE_LIBSAIS" ]; then
   CC=${CC:-cc}
   "$CC" -O3 -c third_party/libsais/libsais.c -o "$OUT/libsais/libsais.o"
@@ -36,8 +37,12 @@ if [ -n "$USE_LIBSAIS" ]; then
 fi
 
 mkdir -p "$OUT/tests"
-for t in tests/test_sais.lpr tests/test_bwt.lpr; do
+for t in tests/test_sais.lpr tests/test_bwt.lpr tests/test_codec.lpr; do
   echo "== $t"
   fpc $OPT $MODE -Mobjfpc $DEFS -Fusrc $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
       -FE"$OUT/tests" "$t"
 done
+
+echo "== tvct"
+fpc $OPT $MODE -Mobjfpc $DEFS -Fusrc $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
+    -FE"$OUT" src/tvct.lpr

@@ -200,6 +200,36 @@ the row at each chunk boundary and the decoder walks several independent chains
 in parallel, which turns a serial latency chain into memory-level parallelism.
 That plan is what the assembly kernels will implement.
 
+### M1 end-to-end
+
+The format, the CLI and the whole pipeline are working; 85 MB text corpus,
+16 MB blocks, one thread:
+
+| pipeline | ratio | compress | decompress |
+|---|---|---|---|
+| BWT + MTF/RLE + 3-context rANS | 20.36 % | 11.9 MB/s | 9.9 MB/s |
+
+Measured alternatives on the same file: bzip3 16.90 %, xz -6 20.19 %, bzip2 -9
+20.78 %, zstd -19 20.18 %, brotli -9 22.02 %.
+
+Two findings from this phase:
+
+- **LZP with a short minimum match hurts.** At 4 bytes it costs 12 % of the final
+  size: it removes the repeats the BWT would have clustered. bzip3 uses aminimum
+  match of 40, which only collapses long redundant data. Our LZP is implemented
+  and off by default until it is re-tuned to that shape.
+- **bzip3's ratio comes from the entropy coder, not from MTF.** Reading its
+  source: it applies RLE, then LZP with a 40-byte minimum, then BWT, and codes
+  bytes with a context-mixing arithmetic coder (order-1 and order-2 bit models,
+  mixed and passed through an APM). MTF + rANS is the bzip2 architecture, and it
+  measures at bzip2-plus-a-little, exactly as expected.
+
+Decompression at 9.9 MB/s is the next problem: the inverse BWT alone runs at
+26-36 MB/s and is a dependent chain of random reads, the MTF/RLE decode is
+scalar with byte moves, and the rANS decode indexes a table per symbol. Moving
+those three to C with assembly and giving the inverse BWT independent chains is
+the next milestone.
+
 ## 4. What is still open
 
 - **SA-IS in Pascal at speed.** The one real risk. A 16 MB block needs a

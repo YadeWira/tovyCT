@@ -40,6 +40,24 @@ tvct b [file ...]                  benchmark
 A C header (`include/tvct.h`) and a set of Pascal units will expose the same
 codec to third-party programs.
 
+## C API
+
+`scripts/build.sh` produces `build/libtvct.so` and `build/tvct.h`:
+
+```c
+size_t  tvct_compress_bound(size_t src_size);
+int64_t tvct_get_size(const void *src, size_t src_size);
+int64_t tvct_compress(const void *src, size_t src_size,
+                      void *dst, size_t dst_cap, int threads, int block_log);
+int64_t tvct_decompress(const void *src, size_t src_size,
+                        void *dst, size_t dst_cap, int threads);
+const char *tvct_version(void);
+```
+
+`threads <= 0` picks one worker per CPU up to 8, `block_log <= 0` uses 23
+(8 MiB blocks). Buffers are used in place: no copy of the payload is made.
+Every call returns -1 on a corrupt stream or a destination that is too small.
+
 ## Building
 
 Requirements: Free Pascal 3.2.2 (the current stable release) and, optionally, a C
@@ -71,7 +89,8 @@ byte-identical output with the blocks compressed in parallel:
 
 | | ratio | compress | decompress |
 |---|---|---|---|
-| **tovyCT, one thread** | **17.46 %** | **16.4 MB/s** | **30.4 MB/s** |
+| **tovyCT, default (8 threads)** | **17.46 %** | **62.0 MB/s** | **71.9 MB/s** |
+| tovyCT, one thread (`-T 1`) | 17.46 % | 16.4 MB/s | 30.4 MB/s |
 | **tovyCT, `-T 8`** | **17.46 %** | **62.0 MB/s** | **71.9 MB/s** |
 | **tovyCT, `-T 16`** | **17.46 %** | **72.4 MB/s** | **97.3 MB/s** |
 | bsc 3.3.12, one thread | 17.33 % | 17.5 MB/s | 29.5 MB/s |

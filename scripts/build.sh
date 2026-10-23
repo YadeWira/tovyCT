@@ -65,3 +65,13 @@ done
 echo "== tvct"
 fpc $OPT $MODE -Mobjfpc $DEFS -Fusrc $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
     -FE"$OUT" src/tvct.lpr
+
+echo "== libtvct"
+mkdir -p "$OUT/units"
+fpc $OPT $MODE -Mobjfpc $DEFS -Fusrc $LIBS -Fu"$OUT/units" -FU"$OUT/units" \
+    -o"$OUT/libtvct.so" src/tvct.api.lpr
+cp include/tvct.h "$OUT/tvct.h"
+if command -v cc >/dev/null 2>&1; then
+  cc -O2 -I"$OUT" tests/test_api.c -L"$OUT" -ltvct -Wl,-rpath,"$(pwd)/$OUT" \
+     -o "$OUT/test_api"
+fi

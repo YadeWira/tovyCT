@@ -16,18 +16,20 @@ program tvct;
 
 uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
-  Classes, SysUtils, DateUtils, tvct.codec;
+  Classes, SysUtils, DateUtils, tvct.codec, tvct.host;
 
 var
   Quiet: Boolean = False;
-  Threads: Int32 = 1;
+  Threads: Int32 = -1;   { -1: decide from the CPU count }
 
 procedure Usage;
 begin
   WriteLn('usage:');
-  WriteLn('  tvct c <input> [output] [-b MB] [-T threads]   compress');
-  WriteLn('  tvct d <input> [output]           decompress');
-  WriteLn('  tvct t <input>                    verify');
+  WriteLn('  tvct c <input> [output] [-b MB] [-T N]   compress (default blocks 8 MB)');
+  WriteLn('  tvct d <input> [output] [-T N]    decompress');
+  WriteLn('  tvct t <input> [-T N]             verify');
+  WriteLn('');
+  WriteLn('  -T N: worker threads (default: one per CPU, at most 8; -T 1 for one)');
   WriteLn('  tvct i <input>                    show header');
 end;
 
@@ -200,6 +202,15 @@ end;
 var
   Cmd, InPath, OutPath: string;
   i, BlockLog, MB: Int32;
+function DefaultThreads: Int32;
+begin
+  Result := CpuCount;
+  if Result > 8 then
+    Result := 8;
+  if Result < 1 then
+    Result := 1;
+end;
+
 begin
   if ParamCount < 2 then
   begin
@@ -218,9 +229,9 @@ begin
     if ParamStr(i) = '-T' then
     begin
       Inc(i);
-      Threads := StrToIntDef(ParamStr(i), 1);
-      if Threads < 1 then
-        Threads := 1;
+      Threads := StrToIntDef(ParamStr(i), -1);
+      if Threads < 0 then
+        Threads := -1;
       if Threads > 64 then
         Threads := 64;
     end
@@ -243,6 +254,11 @@ begin
     end;
     Inc(i);
   end;
+
+  if Threads < 0 then
+    Threads := DefaultThreads;
+  if Threads = 0 then
+    Threads := CpuCount;
 
   case Cmd of
     'c':

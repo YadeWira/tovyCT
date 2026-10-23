@@ -70,6 +70,10 @@ function CompressStreamMT(Src, Dst: TStream; BlockLog, Threads: Int32;
 function DecompressStreamMT(Src, Dst: TStream; Threads: Int32;
   out Stats: TCodecStats): Boolean;
 
+{ Total uncompressed size of a stream, read from the block headers without
+  decoding anything. Returns -1 if the stream header is not valid. }
+function StreamDataSize(Src: TStream): Int64;
+
 implementation
 
 type
@@ -638,6 +642,49 @@ begin
       FreeMem(Jobs[i].OutBuf);
       FreeMem(Jobs[i].Samples);
     end;
+  end;
+end;
+
+function StreamDataSize(Src: TStream): Int64;
+var
+  Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
+  Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
+  OrigSize, PayloadLen, Method, NSamples: Int32;
+begin
+  Result := -1;
+  if Src.Size - Src.Position < CODEC_HEADER_SIZE then
+    Exit;
+  ReadExact(Src, @Hdr[0], CODEC_HEADER_SIZE);
+  if (Hdr[0] <> Ord('T')) or (Hdr[1] <> Ord('V')) or (Hdr[2] <> Ord('C')) or
+     (Hdr[3] <> Ord('T')) or (Hdr[4] <> CODEC_VERSION) then
+    Exit;
+  Result := 0;
+  while Src.Position + BLOCK_HEADER_SIZE <= Src.Size do
+  begin
+    ReadExact(Src, @Blk[0], BLOCK_HEADER_SIZE);
+    OrigSize := Int32(GetU32(@Blk[0]));
+    PayloadLen := Int32(GetU32(@Blk[4]));
+    Method := Int32(GetU32(@Blk[8]));
+    if (OrigSize <= 0) or (PayloadLen <= 0) then
+      Exit(-1);
+    if Method = METHOD_RAW then
+    begin
+      if PayloadLen <> OrigSize then
+        Exit(-1);
+      Inc(Result, OrigSize);
+      Src.Seek(PayloadLen, soCurrent);
+    end
+    else if Method = METHOD_BWT then
+    begin
+      ReadExact(Src, @Blk[0], BWT_HEADER_EXTRA);
+      NSamples := Int32(GetU32(@Blk[12]));
+      if (NSamples <= 0) or (NSamples > (1 shl 27) div SAMPLE_RATE + 2) then
+        Exit(-1);
+      Inc(Result, OrigSize);
+      Src.Seek(NSamples * SizeOf(Int32) + PayloadLen, soCurrent);
+    end
+    else
+      Exit(-1);
   end;
 end;
 

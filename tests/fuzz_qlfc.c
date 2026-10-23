@@ -22,8 +22,6 @@ int bsc_coder_init(int features);
 int bsc_coder_decompress_bounded(const unsigned char *input, int inputSize,
                                  unsigned char *output, int outputSize,
                                  int coder, int features);
-void bsc_qlfc_set_output_limit(int limit);
-void bsc_qlfc_set_input_end(const unsigned char *end);
 
 /* Redzones after the array catch a vectorised tail store that runs past the
    limit. The logical bound is still OUTPUT_CAP. */

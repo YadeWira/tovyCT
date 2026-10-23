@@ -62,36 +62,9 @@ static inline int bsc_floor_log2(int v)
 }
 
 
-/* Set by the caller before decoding: the decoder refuses a stream that claims
-   more output than the caller can hold. A setter rather than an exported
-   variable, which does not link through Free Pascal on every platform.
-
-   Thread-local: blocks are decoded in parallel and each one has its own
-   buffer, so a shared limit would let one worker's block size reject another
-   worker's block (caught by the multithreaded round-trip). */
-#if defined(_MSC_VER)
-static __declspec(thread) int bsc_qlfc_output_limit = 0;
-#else
-static __thread int bsc_qlfc_output_limit = 0;
-#endif
-
-/* Input bound for the range coder: the caller points it at the end of the
-   compressed block. thread-local because blocks decode in parallel. */
-#if defined(_MSC_VER)
-__declspec(thread) const unsigned char * bsc_qlfc_input_end = 0;
-__declspec(thread) int bsc_qlfc_overrun = 0;
-#else
-__thread const unsigned char * bsc_qlfc_input_end = 0;
-__thread int bsc_qlfc_overrun = 0;
-#endif
-
-extern "C" void bsc_qlfc_set_input_end(const unsigned char * end)
-{
-    bsc_qlfc_input_end = end;
-    bsc_qlfc_overrun = 0;
-}
-
-extern "C" void bsc_qlfc_set_output_limit(int limit) { bsc_qlfc_output_limit = limit; }
+/* The output limit and the end of the compressed block travel as parameters:
+   blocks decode in parallel, so any shared or thread-local copy would be a
+   hazard (and Windows static TLS did not work through Free Pascal's linker). */
 
 #if defined(LIBBSC_DYNAMIC_CPU_DISPATCH)
     unsigned char * bsc_qlfc_transform(const unsigned char * RESTRICT input, unsigned char * RESTRICT buffer, int n, unsigned char * RESTRICT MTFTable);
@@ -1482,7 +1455,7 @@ static const unsigned char ALIGNED(64) rank16_shuffle[16][16] =
 
 #if defined(QLFC_ADAPTIVE_DECODE_FUNCTION_NAME)
 
-int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char * output, QlfcStatisticalModel1 * model)
+int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, const unsigned char * inputEnd, unsigned char * output, int outputLimit, QlfcStatisticalModel1 * model)
 {
     RangeCoder coder;
 
@@ -1508,9 +1481,9 @@ int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
         rankHistory[i] = runHistory[i] = 0;
     }
 
-    coder.InitDecoder(input);
+    coder.InitDecoder(input, inputEnd);
     int n = (int)coder.DecodeWord();
-    if (n < 0 || (bsc_qlfc_output_limit > 0 && n > bsc_qlfc_output_limit)) return LIBBSC_NOT_COMPRESSIBLE;
+    if (n < 0 || (outputLimit > 0 && n > outputLimit)) return LIBBSC_NOT_COMPRESSIBLE;
 
     unsigned char usedChar[ALPHABET_SIZE];
     for (int i = 0; i < ALPHABET_SIZE; ++i) usedChar[i] = 0;
@@ -1798,14 +1771,14 @@ int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
         }
     }
 
-    return n;
+    return coder.Overrun() ? LIBBSC_NOT_COMPRESSIBLE : n;
 }
 
 #endif
 
 #if defined(QLFC_STATIC_DECODE_FUNCTION_NAME)
 
-int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char * output, QlfcStatisticalModel1 * model)
+int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, const unsigned char * inputEnd, unsigned char * output, int outputLimit, QlfcStatisticalModel1 * model)
 {
     RangeCoder coder;
 
@@ -1831,9 +1804,9 @@ int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char
         rankHistory[i] = runHistory[i] = 0;
     }
 
-    coder.InitDecoder(input);
+    coder.InitDecoder(input, inputEnd);
     int n = (int)coder.DecodeWord();
-    if (n < 0 || (bsc_qlfc_output_limit > 0 && n > bsc_qlfc_output_limit)) return LIBBSC_NOT_COMPRESSIBLE;
+    if (n < 0 || (outputLimit > 0 && n > outputLimit)) return LIBBSC_NOT_COMPRESSIBLE;
 
     unsigned char usedChar[ALPHABET_SIZE];
     for (int i = 0; i < ALPHABET_SIZE; ++i) usedChar[i] = 0;
@@ -2081,14 +2054,14 @@ int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char
         }
     }
 
-    return n;
+    return coder.Overrun() ? LIBBSC_NOT_COMPRESSIBLE : n;
 }
 
 #endif
 
 #if defined(QLFC_STATIC_DECODE_FUNCTION_NAME)
 
-int QLFC_FAST_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char * output, QlfcStatisticalModel2 * model)
+int QLFC_FAST_DECODE_FUNCTION_NAME (const unsigned char * input, const unsigned char * inputEnd, unsigned char * output, int outputLimit, QlfcStatisticalModel2 * model)
 {
     unsigned char ALIGNED(64) MTFTable[ALPHABET_SIZE];
 
@@ -2101,10 +2074,10 @@ int QLFC_FAST_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char *
     for (int i = 0; i < ALPHABET_SIZE; ++i) MTFTable[i] = 0;
 
     RangeCoder coder;
-    coder.InitDecoder(input);
+    coder.InitDecoder(input, inputEnd);
 
     int n = (int)coder.DecodeWord();
-    if (n < 0 || (bsc_qlfc_output_limit > 0 && n > bsc_qlfc_output_limit)) return LIBBSC_NOT_COMPRESSIBLE;
+    if (n < 0 || (outputLimit > 0 && n > outputLimit)) return LIBBSC_NOT_COMPRESSIBLE;
     unsigned char * const outputBase = output;
 
     unsigned char usedChar[ALPHABET_SIZE];
@@ -2293,7 +2266,7 @@ int QLFC_FAST_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char *
         }
     }
 
-    return n;
+    return coder.Overrun() ? LIBBSC_NOT_COMPRESSIBLE : n;
 }
 
 #endif
@@ -2356,41 +2329,44 @@ int bsc_qlfc_fast_encode_block(const unsigned char * input, unsigned char * outp
     return LIBBSC_NOT_ENOUGH_MEMORY;
 }
 
-int bsc_qlfc_static_decode_block(const unsigned char * input, unsigned char * output)
+int bsc_qlfc_static_decode_block(const unsigned char * input, int inputSize, unsigned char * output, int outputSize)
 {
     if (QlfcStatisticalModel1 * model = (QlfcStatisticalModel1 *)bsc_malloc(sizeof(QlfcStatisticalModel1)))
     {
-        int result = bsc_qlfc_static_decode(input, output, model);
+        const unsigned char * inputEnd = inputSize > 0 ? input + inputSize : 0;
+        int result = bsc_qlfc_static_decode(input, inputEnd, output, outputSize, model);
 
         bsc_free(model);
 
-        return bsc_qlfc_overrun ? LIBBSC_NOT_COMPRESSIBLE : result;
+        return result;
     };
     return LIBBSC_NOT_ENOUGH_MEMORY;
 }
 
-int bsc_qlfc_adaptive_decode_block(const unsigned char * input, unsigned char * output)
+int bsc_qlfc_adaptive_decode_block(const unsigned char * input, int inputSize, unsigned char * output, int outputSize)
 {
     if (QlfcStatisticalModel1 * model = (QlfcStatisticalModel1 *)bsc_malloc(sizeof(QlfcStatisticalModel1)))
     {
-        int result = bsc_qlfc_adaptive_decode(input, output, model);
+        const unsigned char * inputEnd = inputSize > 0 ? input + inputSize : 0;
+        int result = bsc_qlfc_adaptive_decode(input, inputEnd, output, outputSize, model);
 
         bsc_free(model);
 
-        return bsc_qlfc_overrun ? LIBBSC_NOT_COMPRESSIBLE : result;
+        return result;
     };
     return LIBBSC_NOT_ENOUGH_MEMORY;
 }
 
-int bsc_qlfc_fast_decode_block(const unsigned char * input, unsigned char * output)
+int bsc_qlfc_fast_decode_block(const unsigned char * input, int inputSize, unsigned char * output, int outputSize)
 {
     if (QlfcStatisticalModel2 * model = (QlfcStatisticalModel2 *)bsc_malloc(sizeof(QlfcStatisticalModel2)))
     {
-        int result = bsc_qlfc_fast_decode(input, output, model);
+        const unsigned char * inputEnd = inputSize > 0 ? input + inputSize : 0;
+        int result = bsc_qlfc_fast_decode(input, inputEnd, output, outputSize, model);
 
         bsc_free(model);
 
-        return bsc_qlfc_overrun ? LIBBSC_NOT_COMPRESSIBLE : result;
+        return result;
     };
     return LIBBSC_NOT_ENOUGH_MEMORY;
 }

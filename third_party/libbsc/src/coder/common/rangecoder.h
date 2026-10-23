@@ -35,17 +35,6 @@ See also the bsc and libbsc web site:
 
 #include "../../platform/platform.h"
 
-/* Optional end of the compressed block, set by the caller through
-   bsc_qlfc_set_input_end; reading past it raises bsc_qlfc_overrun instead of
-   running off the buffer. Thread-local: blocks decode in parallel. */
-#if defined(_MSC_VER)
-extern __declspec(thread) const unsigned char * bsc_qlfc_input_end;
-extern __declspec(thread) int bsc_qlfc_overrun;
-#else
-extern __thread const unsigned char * bsc_qlfc_input_end;
-extern __thread int bsc_qlfc_overrun;
-#endif
-
 class RangeCoder
 {
 
@@ -70,6 +59,8 @@ private:
        forming a misaligned unsigned short* is undefined even if the load is
        done with memcpy. */
     const unsigned char * RESTRICT ari_input;
+    const unsigned char * ari_input_end;   /* nullptr: no bound */
+    int ari_overrun;
           unsigned short * RESTRICT ari_output;
           unsigned short * RESTRICT ari_outputEOB;
           unsigned short * RESTRICT ari_outputStart;
@@ -85,10 +76,10 @@ private:
 
     INLINE unsigned short InputShort()
     {
-        if (bsc_qlfc_input_end != 0 &&
-            bsc_qlfc_input_end - ari_input < (ptrdiff_t)sizeof(unsigned short))
+        if (ari_input_end != 0 &&
+            ari_input_end - ari_input < (ptrdiff_t)sizeof(unsigned short))
         {
-            bsc_qlfc_overrun = 1;
+            ari_overrun = 1;
             return 0;
         }
         unsigned short s;
@@ -214,9 +205,11 @@ public:
         }
     };
 
-    INLINE void InitDecoder(const unsigned char * input)
+    INLINE void InitDecoder(const unsigned char * input, const unsigned char * inputEnd)
     {
         ari_input = input;
+        ari_input_end = inputEnd;
+        ari_overrun = 0;
         ari_code  = 0;
         ari_range = 0xffffffff;
         ari_code  = (ari_code << 16) | InputShort();
@@ -275,6 +268,8 @@ public:
         }
         return byte;
     }
+
+    INLINE bool Overrun() const { return ari_overrun != 0; }
 
     INLINE unsigned int DecodeWord()
     {

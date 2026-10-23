@@ -160,8 +160,10 @@ alphabet (the table is cleared before decoding, so even garbage output is
 deterministic). The coder
 takes an explicit output limit and input end, checks every run and every rank,
 and has a bounded entry point (`bsc_coder_decompress_bounded`) that validates its
-own block table. The output limit is thread-local: blocks decode in parallel and
-a shared limit let one worker's block size reject another's.
+own block table. The output limit and the end of the input are parameters of
+the decode call, so parallel blocks share no state; a thread-local copy was the
+first attempt, but it did not survive the Windows static-library link and made
+two-block decodes fail there.
 
 The evidence is measurement, not proof:
 

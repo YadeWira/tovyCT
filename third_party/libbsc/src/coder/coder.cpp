@@ -40,10 +40,6 @@ See also the bsc and libbsc web site:
 
 #include "qlfc/qlfc.h"
 
-/* Implemented in qlfc.cpp: bounds the range coder to the caller's buffers. */
-extern "C" void bsc_qlfc_set_output_limit(int limit);
-extern "C" void bsc_qlfc_set_input_end(const unsigned char * end);
-
 int bsc_coder_init(int features)
 {
     int result = LIBBSC_NO_ERROR;
@@ -270,11 +266,11 @@ int bsc_coder_compress(const unsigned char * input, unsigned char * output, int 
 }
 
 
-int bsc_coder_decode_block(const unsigned char * input, unsigned char * output, int coder)
+int bsc_coder_decode_block(const unsigned char * input, int inputSize, unsigned char * output, int outputSize, int coder)
 {
-    if (coder == LIBBSC_CODER_QLFC_STATIC)   return bsc_qlfc_static_decode_block  (input, output);
-    if (coder == LIBBSC_CODER_QLFC_ADAPTIVE) return bsc_qlfc_adaptive_decode_block(input, output);
-    if (coder == LIBBSC_CODER_QLFC_FAST)     return bsc_qlfc_fast_decode_block    (input, output);
+    if (coder == LIBBSC_CODER_QLFC_STATIC)   return bsc_qlfc_static_decode_block  (input, inputSize, output, outputSize);
+    if (coder == LIBBSC_CODER_QLFC_ADAPTIVE) return bsc_qlfc_adaptive_decode_block(input, inputSize, output, outputSize);
+    if (coder == LIBBSC_CODER_QLFC_FAST)     return bsc_qlfc_fast_decode_block    (input, inputSize, output, outputSize);
 
     return LIBBSC_BAD_PARAMETER;
 }
@@ -295,11 +291,7 @@ int bsc_coder_decompress_bounded(const unsigned char * input, int inputSize, uns
     int nBlocks = input[0];
     if (nBlocks == 1)
     {
-        bsc_qlfc_set_output_limit(outputSize);
-        bsc_qlfc_set_input_end(input + inputSize);
-        int result = bsc_coder_decode_block(input + 1, output, coder);
-        bsc_qlfc_set_input_end(0);
-        return result;
+        return bsc_coder_decode_block(input + 1, inputSize - 1, output, outputSize, coder);
     }
     if (nBlocks <= 0 || nBlocks > ALPHABET_SIZE) return LIBBSC_BAD_PARAMETER;
 
@@ -327,10 +319,7 @@ int bsc_coder_decompress_bounded(const unsigned char * input, int inputSize, uns
         }
         else
         {
-            bsc_qlfc_set_output_limit(blockOutput);
-            bsc_qlfc_set_input_end(input + inputPtr + blockInput);
-            decompressionResult[blockId] = bsc_coder_decode_block(input + inputPtr, output + outputPtr, coder);
-            bsc_qlfc_set_input_end(0);
+            decompressionResult[blockId] = bsc_coder_decode_block(input + inputPtr, blockInput, output + outputPtr, blockOutput, coder);
             if (decompressionResult[blockId] < 0) return decompressionResult[blockId];
             if (decompressionResult[blockId] != blockOutput) return LIBBSC_BAD_PARAMETER;
         }
@@ -349,7 +338,7 @@ int bsc_coder_decompress(const unsigned char * input, unsigned char * output, in
     int nBlocks = input[0];
     if (nBlocks == 1)
     {
-        return bsc_coder_decode_block(input + 1, output, coder);
+        return bsc_coder_decode_block(input + 1, 0, output, 0, coder);
     }
 
     int decompressionResult[ALPHABET_SIZE];
@@ -382,7 +371,7 @@ int bsc_coder_decompress(const unsigned char * input, unsigned char * output, in
 
             if (inputSize != outputSize)
             {
-                decompressionResult[blockId] = bsc_coder_decode_block(input + inputPtr, output + outputPtr, coder);
+                decompressionResult[blockId] = bsc_coder_decode_block(input + inputPtr, 0, output + outputPtr, 0, coder);
             }
             else
             {
@@ -415,7 +404,7 @@ int bsc_coder_decompress(const unsigned char * input, unsigned char * output, in
 
             if (inputSize != outputSize)
             {
-                decompressionResult[blockId] = bsc_coder_decode_block(input + inputPtr, output + outputPtr, coder);
+                decompressionResult[blockId] = bsc_coder_decode_block(input + inputPtr, 0, output + outputPtr, 0, coder);
             }
             else
             {

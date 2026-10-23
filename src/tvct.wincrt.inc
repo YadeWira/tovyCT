@@ -7,7 +7,10 @@
 {$IFDEF WINDOWS}
 {$LINKLIB kernel32}
 {$LINKLIB advapi32}
+{ Both x86 targets need Intel syntax for the ___chkstk_ms probe below; FPC
+  defaults to AT&T on x86-64. }
 {$IFDEF CPUX86}{$ASMMODE INTEL}{$ENDIF}
+{$IFDEF CPUX86_64}{$ASMMODE INTEL}{$ENDIF}
 
 function wc_malloc(Size: PtrUInt): Pointer; cdecl; alias: {$IFDEF CPUX86_64}'malloc'{$ELSE}'_malloc'{$ENDIF};
 begin

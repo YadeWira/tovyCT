@@ -19,7 +19,7 @@
 typedef struct {
     uint16_t C0[256];
     uint16_t C1[256][256];
-    uint16_t C2[512][17];
+    uint16_t C2[512][66];
 } cm_state;
 
 static void cm_init(cm_state *s)
@@ -32,8 +32,8 @@ static void cm_init(cm_state *s)
             s->C1[i][j] = 1 << 15;
     for (i = 0; i < 2; i++)
         for (j = 0; j < 256; j++)
-            for (k = 0; k < 17; k++)
-                s->C2[2 * j + i][k] = (uint16_t)((k << 12) - (k == 16));
+            for (k = 0; k < 66; k++)
+                s->C2[2 * j + i][k] = (uint16_t)((k << 10) - (k == 64));
 }
 
 #define UPD0(p, x) ((p) = (uint16_t)((p) - ((p) >> (x))))
@@ -67,10 +67,8 @@ int tvct_cm_encode(const uint8_t *buf, int32_t n, uint8_t *out, int32_t outcap,
             p1 = s->C1[c1][ctx];
             p2 = s->C1[c2][ctx];
             p = ((p0 + p1) * 7 + p2 + p2) >> 4;
-            j = p >> 12;
-            x1 = s->C2[2 * ctx + f][j];
-            x2 = s->C2[2 * ctx + f][j + 1];
-            ssep = x1 + (((x2 - x1) * (p & 4095)) >> 12);
+            j = p >> 10;
+            ssep = s->C2[2 * ctx + f][j];
             pr = ssep * 3 + p;
 
             if (c & (uint32_t)(1u << bit))
@@ -86,7 +84,6 @@ int tvct_cm_encode(const uint8_t *buf, int32_t n, uint8_t *out, int32_t outcap,
                 UPD1(s->C0[ctx], 2);
                 UPD1(s->C1[c1][ctx], 4);
                 UPD1(s->C2[2 * ctx + f][j], 6);
-                UPD1(s->C2[2 * ctx + f][j + 1], 6);
                 ctx += ctx + 1;
             }
             else
@@ -102,7 +99,6 @@ int tvct_cm_encode(const uint8_t *buf, int32_t n, uint8_t *out, int32_t outcap,
                 UPD0(s->C0[ctx], 2);
                 UPD0(s->C1[c1][ctx], 4);
                 UPD0(s->C2[2 * ctx + f][j], 6);
-                UPD0(s->C2[2 * ctx + f][j + 1], 6);
                 ctx += ctx;
             }
         }
@@ -150,10 +146,8 @@ int tvct_cm_decode(const uint8_t *in, int32_t inlen, int32_t n, uint8_t *out)
             p1 = s->C1[c1][ctx];
             p2 = s->C1[c2][ctx];
             p = ((p0 + p1) * 7 + p2 + p2) >> 4;
-            j = p >> 12;
-            x1 = s->C2[2 * ctx + f][j];
-            x2 = s->C2[2 * ctx + f][j + 1];
-            ssep = x1 + (((x2 - x1) * (p & 4095)) >> 12);
+            j = p >> 10;
+            ssep = s->C2[2 * ctx + f][j];
             pr = ssep * 3 + p;
 
             {
@@ -164,7 +158,6 @@ int tvct_cm_decode(const uint8_t *in, int32_t inlen, int32_t n, uint8_t *out)
                     UPD1(s->C0[ctx], 2);
                     UPD1(s->C1[c1][ctx], 4);
                     UPD1(s->C2[2 * ctx + f][j], 6);
-                    UPD1(s->C2[2 * ctx + f][j + 1], 6);
                     ctx += ctx + 1;
                 }
                 else
@@ -173,7 +166,6 @@ int tvct_cm_decode(const uint8_t *in, int32_t inlen, int32_t n, uint8_t *out)
                     UPD0(s->C0[ctx], 2);
                     UPD0(s->C1[c1][ctx], 4);
                     UPD0(s->C2[2 * ctx + f][j], 6);
-                    UPD0(s->C2[2 * ctx + f][j + 1], 6);
                     ctx += ctx;
                 }
             }

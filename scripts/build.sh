@@ -14,13 +14,16 @@ OUT=build
 
 DEFS=""
 LIBS=""
+# Native code generation by default; pass --portable for a generic binary.
+CFLAGS="-O3 -march=native"
 OPT="-O3"
 MODE=""
 
 for arg in "$@"; do
   case "$arg" in
     --libsais) USE_LIBSAIS=1 ;;
-    --debug)   OPT="-O1"; MODE="-g -gl"; OUT=build/dbg ;;
+    --debug)   OPT="-O1"; MODE="-g -gl"; OUT=build/dbg; CFLAGS="-O1 -g" ;;
+    --portable) CFLAGS="-O3" ;;
     *) echo "unknown option: $arg" >&2; exit 1 ;;
   esac
 done
@@ -29,14 +32,14 @@ mkdir -p "$OUT/tests" "$OUT/libsais" "$OUT/lib"
 
 # C kernels are always built: they are part of the decoder.
 CC=${CC:-cc}
-"$CC" -O3 -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
-"$CC" -O3 -c src/c/tvct_cm.c -o "$OUT/lib/tvct_cm.o"
+"$CC" $CFLAGS -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
+"$CC" $CFLAGS -c src/c/tvct_cm.c -o "$OUT/lib/tvct_cm.o"
 ar rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o" "$OUT/lib/tvct_cm.o"
 LIBS="$LIBS -Fl$(pwd)/$OUT/lib"
 
 if [ -n "$USE_LIBSAIS" ]; then
   CC=${CC:-cc}
-  "$CC" -O3 -c third_party/libsais/libsais.c -o "$OUT/libsais/libsais.o"
+  "$CC" $CFLAGS -c third_party/libsais/libsais.c -o "$OUT/libsais/libsais.o"
   ar rcs "$OUT/libsais/libsais.a" "$OUT/libsais/libsais.o"
   DEFS="-dTVCT_LIBSAIS"
   LIBS="$LIBS -Fl$(pwd)/$OUT/libsais"

@@ -259,18 +259,23 @@ none of its code is used).
 
 | blocks | ratio | compress | decompress |
 |---|---|---|---|
-| 16 MB, CM | 17.12 % | 7.3 MB/s | 9.8 MB/s |
+| 16 MB, CM | 17.23 % | 7.8 MB/s | 10.7 MB/s |
 | 8 MB, CM | 17.39 % | 8.0 MB/s | 10.2 MB/s |
 | 4 MB, CM | 17.88 % | 8.2 MB/s | 10.6 MB/s |
-| 8 MB, MTF + rANS | 20.48 % | 14.6 MB/s | 42.4 MB/s |
+| 8 MB, MTF + rANS | 20.48 % | 13.9 MB/s | 41.6 MB/s |
 
-So the codec now sits at bzip3's ratio (16.90 %) with slightly better speed,
-and keeps a fast mode 19 % larger but four times faster to decode. The remaining
-1.3 % gap to bzip3 is inside its coder; its LZP only shrinks this corpus by 1 %,
-so it is not the difference.
+bzip3 on the same corpus: 16.90 % at 7 MB/s compress and 9 MB/s decompress. So
+the CM mode is within 2 % of its ratio and faster in both directions; the rANS
+mode is 19 % larger and four times faster to decode.
 
-The next lever for the CM mode is decode speed: the bit-serial arithmetic coder
-is the limit, not the BWT.
+Two tunings were measured and rejected. Dropping the APM stage makes the CM 35 %
+faster but only 19.91 % against 19.54 % on a 16 MB block, which is dominated by
+the rANS mode; dropping the order-0 model costs 0.6 points for 12 % speed. The
+full model stays.
+
+The remaining cost is the bit-serial arithmetic coder: 36 cycles per bit, about
+11 MB/s. Beyond that the BWT decode is no longer the limit; the next lever for
+the CM mode would be a parallel or table-driven binary coder, not more BWT work.
 
 ## 4. What is still open
 

@@ -46,8 +46,8 @@ Requirements: Free Pascal 3.2.2 (the current stable release) and, optionally, a 
 compiler for the libsais accelerator.
 
 ```sh
-scripts/build.sh              # pure Pascal suffix array
-scripts/build.sh --libsais    # vendor libsais as an optional accelerator
+scripts/build.sh --libsais    # recommended: libsais for the suffix array
+scripts/build.sh --portable   # generic code generation instead of -march=native
 ./build/tests/test_sais
 ./build/tests/test_bwt corpora/text.bin
 ```
@@ -70,8 +70,8 @@ Two entropy backends on the 85 MB text corpus, one thread:
 
 | | ratio | compress | decompress |
 |---|---|---|---|
-| **tovyCT, MTF + rANS (default)** | **20.48 %** | **14.6 MB/s** | **42.4 MB/s** |
-| **tovyCT, context mixing (`--cm`)** | **17.12 %** | **7.3 MB/s** | **9.8 MB/s** |
+| **tovyCT, MTF + rANS (default)** | **20.48 %** | **13.9 MB/s** | **41.6 MB/s** |
+| **tovyCT, context mixing (`--cm`)** | **17.23 %** | **7.8 MB/s** | **10.7 MB/s** |
 | bzip3 | 16.90 % | 7 MB/s | 9 MB/s |
 | xz -6 | 20.19 % | 6 MB/s | ~80 MB/s |
 | bzip2 -9 | 20.78 % | 11 MB/s | 35 MB/s |

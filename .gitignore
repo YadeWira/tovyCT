@@ -1,0 +1,20 @@
+# Build products
+build/
+*.o
+*.ppu
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+research/model/model
+
+# Corpora and benchmark output
+corpora/
+*.bin
+*.out
+*.tsv
+
+# Editors and OS noise
+*.swp
+.DS_Store

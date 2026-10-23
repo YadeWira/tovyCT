@@ -247,13 +247,13 @@ Decoding runs in C kernels. The encoder stores the LF-chain row of every
 so the decoder walks eight independent chains instead of one serial one.
 ## 4. What is still open
 
-- **The entropy decoder is not safe on hostile input.** QLFC reads the decoded
-  size from the arithmetic stream and trusts it. The block CRC catches random
-  corruption, and the decoder checks every index it is given, but a fabricated
-  stream with a recomputed CRC reaches a wild read. Fuzzing found a case where a
-  one-byte change in the payload (with the CRC patched) faults inside the coder.
-  Options: a guard-page sandbox around the entropy step (turn the fault into
-  -1), or a hardened coder of our own.
+- **The entropy decoder is hardened, not proved.** QLFC used to trust the size
+  it decodes and could write or read past the caller's buffers on a fabricated
+  stream. The coder now takes an output limit and an input end, and every run
+  write is checked; the block CRC catches corruption before any of that. Fuzzing
+  (20,000 format-aware mutations through the API plus 80M libFuzzer runs under
+  ASan/UBSan) is clean, but the argument rests on measurement. A guard-page
+  sandbox around the entropy step would turn any future fault into -1 as well.
 
 - **SA-IS in Pascal at speed.** The one real risk. A 16 MB block needs a
   suffix array build at 30+ MB/s to keep the encoder above 15 MB/s overall.

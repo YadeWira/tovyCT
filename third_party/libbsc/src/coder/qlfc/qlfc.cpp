@@ -50,6 +50,22 @@ See also the bsc and libbsc web site:
    variable, which does not link through Free Pascal on every platform. */
 static int bsc_qlfc_output_limit = 0;
 
+/* Input bound for the range coder: the caller points it at the end of the
+   compressed block. thread-local because blocks decode in parallel. */
+#if defined(_MSC_VER)
+__declspec(thread) const unsigned char * bsc_qlfc_input_end = 0;
+__declspec(thread) int bsc_qlfc_overrun = 0;
+#else
+__thread const unsigned char * bsc_qlfc_input_end = 0;
+__thread int bsc_qlfc_overrun = 0;
+#endif
+
+extern "C" void bsc_qlfc_set_input_end(const unsigned char * end)
+{
+    bsc_qlfc_input_end = end;
+    bsc_qlfc_overrun = 0;
+}
+
 extern "C" void bsc_qlfc_set_output_limit(int limit) { bsc_qlfc_output_limit = limit; }
 
 #if defined(LIBBSC_DYNAMIC_CPU_DISPATCH)
@@ -1727,6 +1743,7 @@ int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
             contextRank4 = ((contextRank4 << 2) | (rank < 3    ? rank : 3)) & 0xff;
             contextRun   = ((contextRun   << 1) | (runSize < 3 ? 1    : 0)) & 0xf;
 
+            if (i + runSize > n) return LIBBSC_NOT_COMPRESSIBLE;
             for (; runSize > 0; --runSize) output[i++] = currentChar;
         }
         else
@@ -1741,6 +1758,7 @@ int QLFC_ADAPTIVE_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned ch
             contextRank4 = ((contextRank4 << 2) | (rank < 3    ? rank : 3)) & 0xff;
             contextRun   = ((contextRun   << 1) | (                     1)) & 0xf;
 
+            if (i >= n) return LIBBSC_NOT_COMPRESSIBLE;
             output[i++] = currentChar;
         }
     }
@@ -1995,6 +2013,7 @@ int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char
             contextRank4 = ((contextRank4 << 2) | (rank < 3    ? rank : 3)) & 0xff;
             contextRun   = ((contextRun   << 1) | (runSize < 3 ? 1    : 0)) & 0xf;
         
+            if (i + runSize > n) return LIBBSC_NOT_COMPRESSIBLE;
             for (; runSize > 0; --runSize) output[i++] = currentChar;
         }
         else
@@ -2008,6 +2027,7 @@ int QLFC_STATIC_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char
             contextRank4 = ((contextRank4 << 2) | (rank < 3    ? rank : 3)) & 0xff;
             contextRun   = ((contextRun   << 1) | (                     1)) & 0xf;
 
+            if (i >= n) return LIBBSC_NOT_COMPRESSIBLE;
             output[i++] = currentChar;
         }
     }
@@ -2030,6 +2050,7 @@ int QLFC_FAST_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char *
 
     int n = (int)coder.DecodeWord();
     if (n < 0 || (bsc_qlfc_output_limit > 0 && n > bsc_qlfc_output_limit)) return LIBBSC_NOT_COMPRESSIBLE;
+    unsigned char * const outputBase = output;
 
     unsigned char usedChar[ALPHABET_SIZE];
     for (int i = 0; i < ALPHABET_SIZE; ++i) usedChar[i] = 0;
@@ -2191,6 +2212,7 @@ int QLFC_FAST_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char *
                         runSize += runSize + b;
                     }
 
+                    if (output + runSize > outputBase + n) return LIBBSC_NOT_COMPRESSIBLE;
                     for (; runSize > 0; --runSize) { *output++ = currentChar; }
                 }
                 else
@@ -2203,11 +2225,13 @@ int QLFC_FAST_DECODE_FUNCTION_NAME (const unsigned char * input, unsigned char *
                         runSize += runSize + b;
                     }
 
+                    if (output + runSize > outputBase + n) return LIBBSC_NOT_COMPRESSIBLE;
                     for (; runSize > 0; --runSize) { *output++ = currentChar; }
                 }
             }
             else
             {
+                if (output >= outputBase + n) return LIBBSC_NOT_COMPRESSIBLE;
                 *output++ = currentChar; ProbabilityCounter::UpdateBit<5>(predictor[0], 2025); coder.DecodeBit0<11>(p);
             }
         }
@@ -2284,7 +2308,7 @@ int bsc_qlfc_static_decode_block(const unsigned char * input, unsigned char * ou
 
         bsc_free(model);
 
-        return result;
+        return bsc_qlfc_overrun ? LIBBSC_NOT_COMPRESSIBLE : result;
     };
     return LIBBSC_NOT_ENOUGH_MEMORY;
 }
@@ -2297,7 +2321,7 @@ int bsc_qlfc_adaptive_decode_block(const unsigned char * input, unsigned char * 
 
         bsc_free(model);
 
-        return result;
+        return bsc_qlfc_overrun ? LIBBSC_NOT_COMPRESSIBLE : result;
     };
     return LIBBSC_NOT_ENOUGH_MEMORY;
 }
@@ -2310,7 +2334,7 @@ int bsc_qlfc_fast_decode_block(const unsigned char * input, unsigned char * outp
 
         bsc_free(model);
 
-        return result;
+        return bsc_qlfc_overrun ? LIBBSC_NOT_COMPRESSIBLE : result;
     };
     return LIBBSC_NOT_ENOUGH_MEMORY;
 }

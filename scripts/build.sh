@@ -38,7 +38,7 @@ case "$TARGET" in
   host)
     CC=${CC:-cc}; CXX=${CXX:-c++}; AR=${AR:-ar}
     FPC=${FPC:-fpc}
-    CFLAGS="-O3 -march=native"; [ "$PORTABLE" = 1 ] && CFLAGS="-O3"
+    CFLAGS="-O3 -fPIC -march=native"; [ "$PORTABLE" = 1 ] && CFLAGS="-O3"
     EXE=""; SO="libtvct.so"; OUT=build
     if [ "$(uname -s)" = Darwin ]; then
       SO="libtvct.dylib"
@@ -48,13 +48,13 @@ case "$TARGET" in
   win64)
     CC=x86_64-w64-mingw32-gcc; CXX=x86_64-w64-mingw32-g++; AR=x86_64-w64-mingw32-ar
     FPC="$FPC_CROSS/fpc-win64"
-    CFLAGS="-O3 -DTVCT_PORTABLE"; EXE=".exe"; SO="tvct.dll"; OUT=build/win64
+    CFLAGS="-O3 -fPIC -DTVCT_PORTABLE"; EXE=".exe"; SO="tvct.dll"; OUT=build/win64
     WINLIB="/usr/x86_64-w64-mingw32/lib $(ls -d /usr/lib/gcc/x86_64-w64-mingw32/*/ | head -1)"
     ;;
   win32)
     CC=i686-w64-mingw32-gcc; CXX=i686-w64-mingw32-g++; AR=i686-w64-mingw32-ar
     FPC="$FPC_CROSS/fpc-win32"
-    CFLAGS="-O3 -DTVCT_PORTABLE"; EXE=".exe"; SO="tvct.dll"; OUT=build/win32
+    CFLAGS="-O3 -fPIC -DTVCT_PORTABLE"; EXE=".exe"; SO="tvct.dll"; OUT=build/win32
     WINLIB="/usr/i686-w64-mingw32/lib $(ls -d /usr/lib/gcc/i686-w64-mingw32/*/ | head -1)"
     ;;
   linux-arm64)

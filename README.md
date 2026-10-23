@@ -128,12 +128,16 @@ Each block carries a CRC-32C of its compressed payload, checked before anything
 is decoded, and the decoder validates the BWT primary index and every sample row
 against the block size before touching a buffer.
 
-The entropy coder itself (QLFC from libbsc) does not validate the size it decodes
-against the caller's buffer: a *crafted* stream with a valid payload CRC can make
-it read a wild pointer. The bundled fuzzer (`.github/fuzz.sh`) demonstrates it.
-Corruption is caught (the CRC), fabrication is not; decoding archives from
-untrusted sources is therefore not safe yet. The fix on the table is to run the
-entropy step inside a guard-page sandbox and turn a fault into an error.
+The entropy coder is bounded too. Fuzzing found that QLFC trusted the size it
+decodes and could write past the output; three changes close that: the caller
+sets an output limit, every run write is checked against it, and the range coder
+refuses to read past the end of the compressed block. A fabricated stream now
+ends in an error instead of a fault: 20,000 mutated payloads with recomputed
+CRCs through the API and 80 million libFuzzer executions (AddressSanitizer +
+UBSan) run clean.
+
+That is hardening by measurement, not a proof; the fuzzer and its seed corpus
+live in `tests/fuzz_decode.c` and `.github/fuzz.sh`.
 
 ## Licence
 

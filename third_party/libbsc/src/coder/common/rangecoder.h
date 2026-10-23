@@ -35,6 +35,17 @@ See also the bsc and libbsc web site:
 
 #include "../../platform/platform.h"
 
+/* Optional end of the compressed block, set by the caller through
+   bsc_qlfc_set_input_end; reading past it raises bsc_qlfc_overrun instead of
+   running off the buffer. Thread-local: blocks decode in parallel. */
+#if defined(_MSC_VER)
+extern __declspec(thread) const unsigned char * bsc_qlfc_input_end;
+extern __declspec(thread) int bsc_qlfc_overrun;
+#else
+extern __thread const unsigned char * bsc_qlfc_input_end;
+extern __thread int bsc_qlfc_overrun;
+#endif
+
 class RangeCoder
 {
 
@@ -71,6 +82,12 @@ private:
 
     INLINE unsigned short InputShort()
     {
+        if (bsc_qlfc_input_end != 0 &&
+            (const unsigned char *)ari_input + sizeof(unsigned short) > bsc_qlfc_input_end)
+        {
+            bsc_qlfc_overrun = 1;
+            return 0;
+        }
 #ifndef LIBBSC_NO_UNALIGNED_ACCESS
         return *ari_input++;
 #else

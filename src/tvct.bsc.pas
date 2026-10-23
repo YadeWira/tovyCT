@@ -37,6 +37,11 @@ function bsc_coder_decompress(input, output: PByte; coder, features: Int32): Int
 procedure bsc_qlfc_set_output_limit(limit: Int32); cdecl;
   external name 'bsc_qlfc_set_output_limit';
 
+{ End of the compressed block: the decoder stops with an error instead of
+  reading past it. Nil disables the bound. }
+procedure bsc_qlfc_set_input_end(ending: PByte); cdecl;
+  external name 'bsc_qlfc_set_input_end';
+
 implementation
 
 end.

@@ -252,8 +252,10 @@ begin
   try
     if GetEnvironmentVariable('TVCT_DEBUG') <> '' then WriteLn(StdErr, 'dbg: bsc decode start');
     bsc_qlfc_set_output_limit(BwtSize);
+    bsc_qlfc_set_input_end(Payload + PayloadLen);
     R := bsc_coder_decompress(Payload, BwtBuf, BSC_CODER_STATIC, 0);
     bsc_qlfc_set_output_limit(0);
+    bsc_qlfc_set_input_end(nil);
     if GetEnvironmentVariable('TVCT_DEBUG') <> '' then WriteLn(StdErr, 'dbg: bsc decode done ', R);
     if R <> BwtSize then
       Exit;

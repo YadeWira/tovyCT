@@ -46,8 +46,11 @@ See also the bsc and libbsc web site:
 #include "qlfc_model.h"
 
 /* Set by the caller before decoding: the decoder refuses a stream that claims
-   more output than the caller can hold. */
-int bsc_qlfc_output_limit = 0;
+   more output than the caller can hold. A setter rather than an exported
+   variable, which does not link through Free Pascal on every platform. */
+static int bsc_qlfc_output_limit = 0;
+
+extern "C" void bsc_qlfc_set_output_limit(int limit) { bsc_qlfc_output_limit = limit; }
 
 #if defined(LIBBSC_DYNAMIC_CPU_DISPATCH)
     unsigned char * bsc_qlfc_transform(const unsigned char * RESTRICT input, unsigned char * RESTRICT buffer, int n, unsigned char * RESTRICT MTFTable);

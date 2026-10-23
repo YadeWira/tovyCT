@@ -251,9 +251,9 @@ begin
   GetMem(BwtBuf, BwtSize + 1);
   try
     if GetEnvironmentVariable('TVCT_DEBUG') <> '' then WriteLn(StdErr, 'dbg: bsc decode start');
-    bsc_qlfc_output_limit := BwtSize;
+    bsc_qlfc_set_output_limit(BwtSize);
     R := bsc_coder_decompress(Payload, BwtBuf, BSC_CODER_STATIC, 0);
-    bsc_qlfc_output_limit := 0;
+    bsc_qlfc_set_output_limit(0);
     if GetEnvironmentVariable('TVCT_DEBUG') <> '' then WriteLn(StdErr, 'dbg: bsc decode done ', R);
     if R <> BwtSize then
       Exit;

@@ -34,8 +34,8 @@ function bsc_coder_decompress(input, output: PByte; coder, features: Int32): Int
 
 { Output bound checked by the decoder: a stream that claims more bytes than the
   caller can hold is rejected instead of written past the buffer. }
-var
-  bsc_qlfc_output_limit: Int32; external name 'bsc_qlfc_output_limit';
+procedure bsc_qlfc_set_output_limit(limit: Int32); cdecl;
+  external name 'bsc_qlfc_set_output_limit';
 
 implementation
 

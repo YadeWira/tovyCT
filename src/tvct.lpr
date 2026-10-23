@@ -15,15 +15,17 @@ program tvct;
 {$R-}{$Q-}
 
 uses
+  {$IFDEF UNIX}cthreads,{$ENDIF}
   Classes, SysUtils, DateUtils, tvct.codec;
 
 var
   Quiet: Boolean = False;
+  Threads: Int32 = 1;
 
 procedure Usage;
 begin
   WriteLn('usage:');
-  WriteLn('  tvct c <input> [output] [-b MB]   compress');
+  WriteLn('  tvct c <input> [output] [-b MB] [-T threads]   compress');
   WriteLn('  tvct d <input> [output]           decompress');
   WriteLn('  tvct t <input>                    verify');
   WriteLn('  tvct i <input>                    show header');
@@ -77,7 +79,10 @@ begin
     try
       T0 := Now;
       try
-        Result := CompressStream(Src, Dst, BlockLog, Stats);
+        if Threads > 1 then
+          Result := CompressStreamMT(Src, Dst, BlockLog, Threads, Stats)
+        else
+          Result := CompressStream(Src, Dst, BlockLog, Stats);
       except
         on E: Exception do
         begin
@@ -108,7 +113,10 @@ begin
     try
       T0 := Now;
       try
-        Result := DecompressStream(Src, Dst, Stats);
+        if Threads > 1 then
+          Result := DecompressStreamMT(Src, Dst, Threads, Stats)
+        else
+          Result := DecompressStream(Src, Dst, Stats);
       except
         on E: Exception do
         begin
@@ -138,7 +146,10 @@ begin
     Null := TMemoryStream.Create;
     try
       T0 := Now;
-      Result := DecompressStream(Src, Null, Stats);
+      if Threads > 1 then
+        Result := DecompressStreamMT(Src, Null, Threads, Stats)
+      else
+        Result := DecompressStream(Src, Null, Stats);
       if Result then
         WriteLn(Format('ok: %d blocks, %s, %.1f MB/s', [Stats.Blocks,
           HumanBytes(Stats.OutBytes), (Stats.OutBytes / 1e6) / ((Now - T0) * SecsPerDay)]))
@@ -204,7 +215,16 @@ begin
   i := 3;
   while i <= ParamCount do
   begin
-    if ParamStr(i) = '-b' then
+    if ParamStr(i) = '-T' then
+    begin
+      Inc(i);
+      Threads := StrToIntDef(ParamStr(i), 1);
+      if Threads < 1 then
+        Threads := 1;
+      if Threads > 64 then
+        Threads := 64;
+    end
+    else if ParamStr(i) = '-b' then
     begin
       Inc(i);
       MB := StrToIntDef(ParamStr(i), 8);

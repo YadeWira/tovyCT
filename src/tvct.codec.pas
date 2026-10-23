@@ -62,10 +62,74 @@ function CompressStream(Src, Dst: TStream; BlockLog: Int32;
 function DecompressStream(Src, Dst: TStream;
   out Stats: TCodecStats): Boolean;
 
+{ Same, with the blocks of one chunk compressed or decompressed in parallel.
+  Blocks are independent, so the output is byte-identical to the sequential
+  path; Threads <= 1 uses it. }
+function CompressStreamMT(Src, Dst: TStream; BlockLog, Threads: Int32;
+  out Stats: TCodecStats): Boolean;
+function DecompressStreamMT(Src, Dst: TStream; Threads: Int32;
+  out Stats: TCodecStats): Boolean;
+
 implementation
+
+type
+  TBlockJob = record
+    Src, Payload, OutBuf: PByte;
+    Samples: PInt32;
+    N, PayloadLen, BwtSize, Primary, NSamples: Int32;
+    Crc: LongWord;
+    Raw, Ok: Boolean;
+  end;
+  PBlockJob = ^TBlockJob;
+
+  TBlockWorker = class(TThread)
+  private
+    FJob: PBlockJob;
+    FCompress: Boolean;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AJob: PBlockJob; ACompress: Boolean);
+  end;
+
+function CompressBlock(const Src: PByte; N: Int32; Dst: PByte; DstCap: Int32;
+  Samples: PInt32; out BwtSize, Primary, NSamples: Int32): Int32; forward;
+function DecompressBlock(const Payload: PByte; PayloadLen, OrigSize: Int32;
+  BwtSize, Primary, NSamples: Int32; const Samples: PInt32;
+  Dst: PByte): Boolean; forward;
 
 var
   BscReady: Boolean = False;
+
+constructor TBlockWorker.Create(AJob: PBlockJob; ACompress: Boolean);
+begin
+  FJob := AJob;
+  FCompress := ACompress;
+  FreeOnTerminate := False;
+  inherited Create(False);
+end;
+
+procedure TBlockWorker.Execute;
+begin
+  try
+    if FCompress then
+    begin
+      FJob^.Crc := Crc32c(0, FJob^.Src[0], FJob^.N);
+      FJob^.PayloadLen := CompressBlock(FJob^.Src, FJob^.N, FJob^.Payload,
+        FJob^.N + 4096, FJob^.Samples, FJob^.BwtSize, FJob^.Primary,
+        FJob^.NSamples);
+      FJob^.Raw := (FJob^.PayloadLen < 0) or
+        (FJob^.PayloadLen + BWT_HEADER_EXTRA + FJob^.NSamples * 4 + 16 >= FJob^.N);
+      FJob^.Ok := True;
+    end
+    else
+      FJob^.Ok := DecompressBlock(FJob^.Payload, FJob^.PayloadLen, FJob^.N,
+        FJob^.BwtSize, FJob^.Primary, FJob^.NSamples, FJob^.Samples,
+        FJob^.OutBuf);
+  except
+    FJob^.Ok := False;
+  end;
+end;
 
 procedure EnsureBsc;
 begin
@@ -337,6 +401,233 @@ begin
     FreeMem(Samples);
     FreeMem(OutBuf);
     FreeMem(Buf);
+  end;
+end;
+
+
+function CompressStreamMT(Src, Dst: TStream; BlockLog, Threads: Int32;
+  out Stats: TCodecStats): Boolean;
+var
+  Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
+  Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
+  Jobs: array of TBlockJob;
+  Workers: array of TBlockWorker;
+  BlockSize, count, i, MaxSamples: Int32;
+begin
+  Result := False;
+  Stats.InBytes := 0;
+  Stats.OutBytes := 0;
+  Stats.Blocks := 0;
+  Stats.RawBlocks := 0;
+  if Threads <= 1 then
+    Exit(CompressStream(Src, Dst, BlockLog, Stats));
+  if (BlockLog < 16) or (BlockLog > 27) then
+    Exit;
+  EnsureBsc;
+  BlockSize := 1 shl BlockLog;
+  MaxSamples := BlockSize div SAMPLE_RATE + 2;
+
+  Hdr[0] := Ord('T'); Hdr[1] := Ord('V'); Hdr[2] := Ord('C'); Hdr[3] := Ord('T');
+  Hdr[4] := CODEC_VERSION;
+  Hdr[5] := Byte(BlockLog);
+  Hdr[6] := 0;
+  Hdr[7] := 0;
+  Dst.WriteBuffer(Hdr[0], CODEC_HEADER_SIZE);
+  Stats.OutBytes := CODEC_HEADER_SIZE;
+
+  SetLength(Jobs, Threads);
+  SetLength(Workers, Threads);
+  for i := 0 to Threads - 1 do
+  begin
+    Jobs[i].Src := GetMem(BlockSize);
+    Jobs[i].Payload := GetMem(BlockSize + 4096);
+    Jobs[i].Samples := GetMem(MaxSamples * SizeOf(Int32));
+    Jobs[i].Ok := False;
+  end;
+  try
+    repeat
+      count := 0;
+      while (count < Threads) and (Src.Position < Src.Size) do
+      begin
+        Jobs[count].N := Src.Read(Jobs[count].Src[0], BlockSize);
+        if Jobs[count].N <= 0 then
+          Break;
+        Inc(count);
+      end;
+      if count = 0 then
+        Break;
+
+      for i := 0 to count - 1 do
+        Workers[i] := TBlockWorker.Create(@Jobs[i], True);
+      for i := 0 to count - 1 do
+      begin
+        Workers[i].WaitFor;
+        Workers[i].Free;
+        Workers[i] := nil;
+      end;
+
+      for i := 0 to count - 1 do
+      begin
+        if not Jobs[i].Ok then
+          Exit;
+        if Jobs[i].Raw then
+        begin
+          PutU32(@Blk[0], LongWord(Jobs[i].N));
+          PutU32(@Blk[4], LongWord(Jobs[i].N));
+          PutU32(@Blk[8], LongWord(METHOD_RAW));
+          PutU32(@Blk[12], Jobs[i].Crc);
+          Dst.WriteBuffer(Blk[0], BLOCK_HEADER_SIZE);
+          Dst.WriteBuffer(Jobs[i].Src[0], Jobs[i].N);
+          Inc(Stats.OutBytes, BLOCK_HEADER_SIZE + Jobs[i].N);
+          Inc(Stats.RawBlocks);
+        end
+        else
+        begin
+          PutU32(@Blk[0], LongWord(Jobs[i].N));
+          PutU32(@Blk[4], LongWord(Jobs[i].PayloadLen));
+          PutU32(@Blk[8], LongWord(METHOD_BWT));
+          PutU32(@Blk[12], Jobs[i].Crc);
+          Dst.WriteBuffer(Blk[0], BLOCK_HEADER_SIZE);
+          PutU32(@Blk[0], LongWord(Jobs[i].BwtSize));
+          PutU32(@Blk[4], LongWord(Jobs[i].Primary));
+          PutU32(@Blk[8], 0);
+          PutU32(@Blk[12], LongWord(Jobs[i].NSamples));
+          Dst.WriteBuffer(Blk[0], BWT_HEADER_EXTRA);
+          Dst.WriteBuffer(Jobs[i].Samples[0], Jobs[i].NSamples * SizeOf(Int32));
+          Dst.WriteBuffer(Jobs[i].Payload[0], Jobs[i].PayloadLen);
+          Inc(Stats.OutBytes, BLOCK_HEADER_SIZE + BWT_HEADER_EXTRA +
+              Jobs[i].NSamples * 4 + Jobs[i].PayloadLen);
+        end;
+        Inc(Stats.InBytes, Jobs[i].N);
+        Inc(Stats.Blocks);
+      end;
+    until False;
+    Result := True;
+  finally
+    for i := 0 to Threads - 1 do
+    begin
+      FreeMem(Jobs[i].Src);
+      FreeMem(Jobs[i].Payload);
+      FreeMem(Jobs[i].Samples);
+    end;
+  end;
+end;
+
+function DecompressStreamMT(Src, Dst: TStream; Threads: Int32;
+  out Stats: TCodecStats): Boolean;
+var
+  Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
+  Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
+  Jobs: array of TBlockJob;
+  Workers: array of TBlockWorker;
+  BlockSize, count, i, Method, MaxSamples: Int32;
+begin
+  Result := False;
+  Stats.InBytes := 0;
+  Stats.OutBytes := 0;
+  Stats.Blocks := 0;
+  Stats.RawBlocks := 0;
+  if Threads <= 1 then
+    Exit(DecompressStream(Src, Dst, Stats));
+  EnsureBsc;
+
+  ReadExact(Src, @Hdr[0], CODEC_HEADER_SIZE);
+  if (Hdr[0] <> Ord('T')) or (Hdr[1] <> Ord('V')) or (Hdr[2] <> Ord('C')) or
+     (Hdr[3] <> Ord('T')) or (Hdr[4] <> CODEC_VERSION) then
+    Exit;
+  BlockSize := 1 shl Hdr[5];
+  if (BlockSize < 1 shl 16) or (BlockSize > 1 shl 27) then
+    Exit;
+  MaxSamples := BlockSize div SAMPLE_RATE + 2;
+
+  SetLength(Jobs, Threads);
+  SetLength(Workers, Threads);
+  for i := 0 to Threads - 1 do
+  begin
+    Jobs[i].Payload := GetMem(BlockSize + 4096);
+    Jobs[i].OutBuf := GetMem(BlockSize);
+    Jobs[i].Samples := GetMem(MaxSamples * SizeOf(Int32));
+    Jobs[i].Ok := False;
+  end;
+  try
+    repeat
+      count := 0;
+      while (count < Threads) and (Src.Position < Src.Size) do
+      begin
+        ReadExact(Src, @Blk[0], BLOCK_HEADER_SIZE);
+        Jobs[count].N := Int32(GetU32(@Blk[0]));
+        Jobs[count].PayloadLen := Int32(GetU32(@Blk[4]));
+        Method := Int32(GetU32(@Blk[8]));
+        Jobs[count].Crc := GetU32(@Blk[12]);
+        if (Jobs[count].N <= 0) or (Jobs[count].N > BlockSize) then
+          Exit;
+        if Jobs[count].PayloadLen <= 0 then
+          Exit;
+        if Method = METHOD_RAW then
+        begin
+          if Jobs[count].PayloadLen <> Jobs[count].N then
+            Exit;
+          ReadExact(Src, Jobs[count].OutBuf, Jobs[count].N);
+          Jobs[count].Raw := True;
+          Jobs[count].Ok := True;
+        end
+        else if Method = METHOD_BWT then
+        begin
+          ReadExact(Src, @Blk[0], BWT_HEADER_EXTRA);
+          Jobs[count].BwtSize := Int32(GetU32(@Blk[0]));
+          Jobs[count].Primary := Int32(GetU32(@Blk[4]));
+          Jobs[count].NSamples := Int32(GetU32(@Blk[12]));
+          if (Jobs[count].NSamples <= 0) or (Jobs[count].NSamples > MaxSamples) then
+            Exit;
+          ReadExact(Src, PByte(Jobs[count].Samples), Jobs[count].NSamples * SizeOf(Int32));
+          ReadExact(Src, Jobs[count].Payload, Jobs[count].PayloadLen);
+          Jobs[count].Raw := False;
+        end
+        else
+          Exit;
+        Inc(count);
+      end;
+      if count = 0 then
+        Break;
+
+      for i := 0 to count - 1 do
+        if not Jobs[i].Raw then
+          Workers[i] := TBlockWorker.Create(@Jobs[i], False);
+      for i := 0 to count - 1 do
+        if Workers[i] <> nil then
+        begin
+          Workers[i].WaitFor;
+          Workers[i].Free;
+          Workers[i] := nil;
+        end;
+
+      for i := 0 to count - 1 do
+      begin
+        if not Jobs[i].Ok then
+          Exit;
+        if Crc32c(0, Jobs[i].OutBuf[0], Jobs[i].N) <> Jobs[i].Crc then
+          Exit;
+        Dst.WriteBuffer(Jobs[i].OutBuf[0], Jobs[i].N);
+        Inc(Stats.OutBytes, Jobs[i].N);
+        if Jobs[i].Raw then
+        begin
+          Inc(Stats.InBytes, BLOCK_HEADER_SIZE + Jobs[i].N);
+          Inc(Stats.RawBlocks);
+        end
+        else
+          Inc(Stats.InBytes, BLOCK_HEADER_SIZE + BWT_HEADER_EXTRA +
+              Jobs[i].NSamples * 4 + Jobs[i].PayloadLen);
+        Inc(Stats.Blocks);
+      end;
+    until False;
+    Result := True;
+  finally
+    for i := 0 to Threads - 1 do
+    begin
+      FreeMem(Jobs[i].Payload);
+      FreeMem(Jobs[i].OutBuf);
+      FreeMem(Jobs[i].Samples);
+    end;
   end;
 end;
 

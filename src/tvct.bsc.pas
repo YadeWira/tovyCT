@@ -18,7 +18,7 @@ unit tvct.bsc;
 interface
 
 const
-  BSC_CODER_FAST = 0;
+  BSC_CODER_FAST = 3;
   BSC_CODER_STATIC = 1;
   BSC_CODER_ADAPTIVE = 2;
 

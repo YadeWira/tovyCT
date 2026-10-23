@@ -127,6 +127,8 @@ if [ "$TARGET" = host ] && command -v cc >/dev/null 2>&1; then
   else
     cc -O2 -I"$OUT" tests/test_api.c -L"$OUT" -ltvct -Wl,-rpath,"$(pwd)/$OUT" \
        -o "$OUT/test_api"
+    cc -O2 -I"$OUT" tests/test_truncate.c -L"$OUT" -ltvct \
+       -Wl,-rpath,"$(pwd)/$OUT" -o "$OUT/test_truncate"
   fi
 fi
 

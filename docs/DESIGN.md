@@ -224,11 +224,28 @@ Two findings from this phase:
   mixed and passed through an APM). MTF + rANS is the bzip2 architecture, and it
   measures at bzip2-plus-a-little, exactly as expected.
 
-Decompression at 9.9 MB/s is the next problem: the inverse BWT alone runs at
-26-36 MB/s and is a dependent chain of random reads, the MTF/RLE decode is
-scalar with byte moves, and the rANS decode indexes a table per symbol. Moving
-those three to C with assembly and giving the inverse BWT independent chains is
-the next milestone.
+Decompression was the next problem: the inverse BWT is a dependent chain of
+random reads, one memory latency per byte.
+
+The fix is in `src/c/tvct_kernels.c`. The encoder computes the inverse suffix
+array once and stores, for every 4096-byte chunk of the output, the LF-chain row
+of that chunk's last position. That is 0.1 % of the block, and with it the
+decoder starts eight chains at known rows and walks them interleaved, so the
+out-of-order engine keeps eight loads in flight instead of one. The same file
+carries the rANS and MTF/RLE decoders.
+
+Measured, 85 MB text corpus, one thread:
+
+| blocks | ratio | compress | decompress |
+|---|---|---|---|
+| 8 MB | 20.48 % | 14.6 MB/s | 42.4 MB/s |
+| 4 MB | 20.77 % | 16.8 MB/s | 50.2 MB/s |
+| 2 MB | 21.25 % | 16.1 MB/s | 51.6 MB/s |
+
+Decode stage times at 8 MB blocks: inverse BWT 0.96 s, MTF/RLE 0.40 s, rANS
+0.31 s, file write 0.28 s for the whole 85 MB. The inverse BWT is still the
+largest piece; the next step for it is decoding blocks in parallel, since the
+format already makes them independent.
 
 ## 4. What is still open
 

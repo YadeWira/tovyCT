@@ -113,6 +113,8 @@ var
   InF, MidF, OutF: TFileStream;
   Stats: TCodecStats;
   Ok: Boolean;
+  A, B: TBytes;
+  i: Int32;
 begin
   InF := TFileStream.Create(Path, fmOpenRead);
   MidF := TFileStream.Create(Path + '.tvct', fmCreate);
@@ -134,6 +136,19 @@ begin
     InF := TFileStream.Create(Path, fmOpenRead);
     OutF := TFileStream.Create(Path + '.rt', fmOpenRead);
     Check(InF.Size = OutF.Size, 'round-trip size');
+    if InF.Size = OutF.Size then
+    begin
+      SetLength(A, InF.Size);
+      SetLength(B, OutF.Size);
+      InF.ReadBuffer(A[0], InF.Size);
+      OutF.ReadBuffer(B[0], OutF.Size);
+      for i := 0 to High(A) do
+        if A[i] <> B[i] then
+        begin
+          WriteLn(Format('first mismatch at %d: in %d out %d', [i, A[i], B[i]]));
+          Break;
+        end;
+    end;
     InF.Free; OutF.Free;
   end;
 end;

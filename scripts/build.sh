@@ -25,14 +25,20 @@ for arg in "$@"; do
   esac
 done
 
-mkdir -p "$OUT/tests" "$OUT/libsais"
+mkdir -p "$OUT/tests" "$OUT/libsais" "$OUT/lib"
+
+# C kernels are always built: they are part of the decoder.
+CC=${CC:-cc}
+"$CC" -O3 -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
+ar rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o"
+LIBS="$LIBS -Fl$(pwd)/$OUT/lib"
 
 if [ -n "$USE_LIBSAIS" ]; then
   CC=${CC:-cc}
   "$CC" -O3 -c third_party/libsais/libsais.c -o "$OUT/libsais/libsais.o"
   ar rcs "$OUT/libsais/libsais.a" "$OUT/libsais/libsais.o"
   DEFS="-dTVCT_LIBSAIS"
-  LIBS="-Fl$(pwd)/$OUT/libsais"
+  LIBS="$LIBS -Fl$(pwd)/$OUT/libsais"
   echo "libsais: $OUT/libsais/libsais.a"
 fi
 

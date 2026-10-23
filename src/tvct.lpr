@@ -49,7 +49,8 @@ begin
     Result := Format('%.2f MiB', [N / (1024 * 1024)]);
 end;
 
-procedure Report(const What: string; Stats: TCodecStats; Secs: Double);
+procedure Report(const What: string; Stats: TCodecStats; Secs: Double;
+  SpeedBytes: Int64);
 var
   Ratio: Double;
 begin
@@ -60,7 +61,7 @@ begin
   WriteLn(Format('%s: %s -> %s (%.2f%%), %d blocks (%d raw), %.1f MB/s',
     [What, HumanBytes(Stats.InBytes), HumanBytes(Stats.OutBytes), Ratio,
      Stats.Blocks, Stats.RawBlocks,
-     (Stats.InBytes / 1e6) / Secs]));
+     (SpeedBytes / 1e6) / Secs]));
 end;
 
 function DoCompress(const InPath, OutPath: string; BlockLog: Int32): Boolean;
@@ -85,7 +86,7 @@ begin
         end;
       end;
       if Result and not Quiet then
-        Report('compressed', Stats, (Now - T0) * SecsPerDay);
+        Report('compressed', Stats, (Now - T0) * SecsPerDay, Stats.InBytes);
     finally
       Dst.Free;
     end;
@@ -116,7 +117,7 @@ begin
         end;
       end;
       if Result and not Quiet then
-        Report('decompressed', Stats, (Now - T0) * SecsPerDay);
+        Report('decompressed', Stats, (Now - T0) * SecsPerDay, Stats.OutBytes);
     finally
       Dst.Free;
     end;

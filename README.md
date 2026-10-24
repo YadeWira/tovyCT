@@ -58,15 +58,23 @@ one worker per CPU, capped at 8. The compressed bytes do not depend on `-T`.
 
 `-a` selects the adaptive QLFC coder (about 1-2 % smaller, slower) and `-s`
 omits the sample rows (another ~0.1 % smaller and faster to compress, but the
-inverse BWT is serial, so decoding is slower). Both are off by default; with
-`-a -s -b 32` the 85 MB corpus goes from 17.46 % to 16.93 %, in the same range
-as bzip3, at 9.7 MB/s compress and 8.5 MB/s decode on one thread.
+inverse BWT is serial, so decoding is slower). Both are off by default.
 
-There is no free middle: `-b 16` keeps the static coder and gives 17.21 % with
-threaded decode around 60 MB/s, while `-a` with samples costs about a third of
-the decode speed for 0.15-0.25 points, so it is dominated by the other two.
-Block size trades ratio for the number of independent blocks: 16 MiB halves
-them, 32 MiB leaves three on this corpus and loses most of the `-T` scaling.
+Medians of three runs on the 85 MB corpus, with the host otherwise idle:
+
+| mode | ratio | compress T1 / T8 | decompress T1 / T8 |
+|---|---|---|---|
+| static, 8 MiB (default) | 17.46 % | 17.0 / 58.2 MB/s | 29.0 / 69.3 MB/s |
+| static, 16 MiB | 17.21 % | 15.6 / 48.6 MB/s | 26.6 / 66.8 MB/s |
+| adaptive, no samples, 16 MiB | 16.95 % | 11.4 / 37.8 MB/s | 10.9 / 29.0 MB/s |
+| adaptive, no samples, 32 MiB | 16.93 % | 10.7 / 21.0 MB/s | 9.4 / 17.3 MB/s |
+
+There is no free middle: `-a` with samples costs about a third of the speed for
+0.15-0.25 points, so it is dominated. The last 0.02 points of 32 MiB blocks over
+16 MiB cost more than half the threaded speed (three blocks instead of six), so
+16 MiB is the sane ratio mode unless the file fits in a single block. The
+default stays at 8 MiB: it is the fastest and scales better on medium files,
+where 16 MiB leaves only two blocks.
 
 ## C API
 
@@ -124,7 +132,7 @@ byte-identical output with the blocks compressed in parallel:
 | tovyCT, one thread (`-T 1`) | 17.46 % | 16.4 MB/s | 30.4 MB/s |
 | **tovyCT, `-T 8`** | **17.46 %** | **62.0 MB/s** | **71.9 MB/s** |
 | **tovyCT, `-T 16`** | **17.46 %** | **72.4 MB/s** | **97.3 MB/s** |
-| tovyCT, max ratio (`-b 32 -a -s`) | 16.93 % | 9.7 MB/s | 8.5 MB/s |
+| tovyCT, max ratio (`-b 32 -a -s`) | 16.93 % | 10.7 MB/s | 9.4 MB/s |
 | bsc 3.3.12, one thread | 17.33 % | 17.5 MB/s | 29.5 MB/s |
 | bzip3 | 16.90 % | 7 MB/s | 9 MB/s |
 | xz -6 | 20.19 % | 6 MB/s | ~80 MB/s |

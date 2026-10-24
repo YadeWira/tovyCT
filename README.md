@@ -62,6 +62,12 @@ inverse BWT is serial, so decoding is slower). Both are off by default; with
 `-a -s -b 32` the 85 MB corpus goes from 17.46 % to 16.93 %, in the same range
 as bzip3, at 9.7 MB/s compress and 8.5 MB/s decode on one thread.
 
+There is no free middle: `-b 16` keeps the static coder and gives 17.21 % with
+threaded decode around 60 MB/s, while `-a` with samples costs about a third of
+the decode speed for 0.15-0.25 points, so it is dominated by the other two.
+Block size trades ratio for the number of independent blocks: 16 MiB halves
+them, 32 MiB leaves three on this corpus and loses most of the `-T` scaling.
+
 ## C API
 
 `scripts/build.sh` produces `build/libtvct.so` and `build/tvct.h`:

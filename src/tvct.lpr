@@ -25,17 +25,24 @@ var
   Threads: Int32 = -1;   { -1: decide from the CPU count }
   Coder: Int32 = CODER_STATIC;
   NoSamples: Boolean = False;
+  Preset: string = '';
+  BlockLogSet: Boolean = False;
 
 procedure Usage;
 begin
   WriteLn('usage:');
-  WriteLn('  tvct c <input> [output] [-b MB] [-T N] [-a] [-s]   compress (default blocks 8 MB)');
+  WriteLn('  tvct c <input> [output] [-l fast|compact|max] [-b MB] [-T N] [-a] [-s]');
+  WriteLn('                                    compress (default: -l fast)');
   WriteLn('  tvct d <input> [output] [-T N]    decompress');
   WriteLn('  tvct t <input> [-T N]             verify');
   WriteLn('');
   WriteLn('  -T N: worker threads (default: one per CPU, at most 8; -T 1 for one)');
   WriteLn('  -a:   adaptive QLFC (smaller, slower; default is static)');
   WriteLn('  -s:   no sample rows (smaller, slower decode; default keeps them)');
+  WriteLn('  -l fast:    static, 8 MiB blocks, sample rows (default)');
+  WriteLn('  -l compact: static, 16 MiB blocks, sample rows');
+  WriteLn('  -l max:     adaptive, no sample rows, 16 MiB blocks');
+  WriteLn('              (32 MiB when the input fits in a single block)');
   WriteLn('  tvct i <input>                    show header');
 end;
 
@@ -260,6 +267,29 @@ begin
       Coder := CODER_ADAPTIVE
     else if ParamStr(i) = '-s' then
       NoSamples := True
+    else if ParamStr(i) = '-l' then
+    begin
+      Inc(i);
+      Preset := LowerCase(ParamStr(i));
+      if Preset = 'fast' then
+      begin
+        BlockLog := 23; Coder := CODER_STATIC; NoSamples := False;
+      end
+      else if Preset = 'compact' then
+      begin
+        BlockLog := 24; Coder := CODER_STATIC; NoSamples := False;
+      end
+      else if Preset = 'max' then
+      begin
+        BlockLog := 24; Coder := CODER_ADAPTIVE; NoSamples := True;
+      end
+      else
+      begin
+        Usage;
+        Halt(1);
+      end;
+      BlockLogSet := False;
+    end
     else if ParamStr(i) = '-b' then
     begin
       Inc(i);
@@ -269,6 +299,7 @@ begin
       BlockLog := 20 + Int32(Round(Ln(MB) / Ln(2)));
       if (1 shl BlockLog) <> MB * 1024 * 1024 then
         BlockLog := 23;
+      BlockLogSet := True;
     end
     else if OutPath = '' then
       OutPath := ParamStr(i)
@@ -278,6 +309,25 @@ begin
       Halt(1);
     end;
     Inc(i);
+  end;
+
+  { -l max with no explicit -b: one 32 MiB block when the input fits in one,
+    otherwise 16 MiB so the blocks stay independent and parallel. }
+  if (Preset = 'max') and (not BlockLogSet) and (Cmd = 'c') then
+  begin
+    try
+      with TFileStream.Create(InPath, fmOpenRead or fmShareDenyWrite) do
+      try
+        if Size <= Int64(32) * 1024 * 1024 then
+          BlockLog := 25
+        else
+          BlockLog := 24;
+      finally
+        Free;
+      end;
+    except
+      BlockLog := 24;
+    end;
   end;
 
   if Threads < 0 then

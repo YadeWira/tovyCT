@@ -46,7 +46,7 @@ each job.
 ## CLI
 
 ```
-tvct c <input> [output] [-b MB] [-T N] [-a] [-s]   compress (default 8 MiB blocks)
+tvct c <input> [output] [-l fast|compact|max] [-b MB] [-T N] [-a] [-s]
 tvct d <input> [output] [-T N]           decompress
 tvct t <input>                           verify the CRCs without writing output
 tvct i <input>                           show the header and the original size
@@ -55,6 +55,10 @@ tvct i <input>                           show the header and the original size
 Output defaults to `<input>.tvct` when compressing and the name without that
 suffix when decompressing. `-T 1` forces the sequential path; by default it uses
 one worker per CPU, capped at 8. The compressed bytes do not depend on `-T`.
+
+`-l` picks a preset: `fast` (default; static, 8 MiB blocks, sample rows),
+`compact` (static, 16 MiB) or `max` (adaptive, no sample rows, 16 MiB, or 32 MiB
+when the input fits in one block). The individual flags below override it.
 
 `-a` selects the adaptive QLFC coder (about 1-2 % smaller, slower) and `-s`
 omits the sample rows (another ~0.1 % smaller and faster to compress, but the

@@ -32,6 +32,14 @@ if [ -x build/test_payload ]; then
   ./build/test_payload /tmp/tvct-sample.tvct /tmp/tvct-sample.txt
 fi
 
+# Presets: compact and max must be the same streams as the explicit flags.
+for p in compact max; do
+  ./build/tvct c /tmp/tvct-sample.txt /tmp/tvct-sample-$p.tvct -l $p -T 1
+  ./build/tvct t /tmp/tvct-sample-$p.tvct
+  ./build/tvct d /tmp/tvct-sample-$p.tvct /tmp/tvct-sample-$p.out -T 1
+  cmp /tmp/tvct-sample.txt /tmp/tvct-sample-$p.out
+done
+
 # Adaptive coder and no sample rows: a different method in the block header and
 # a serial inverse BWT, both reachable from a hostile stream.
 ./build/tvct c /tmp/tvct-sample.txt /tmp/tvct-sample-adapt.tvct -b 1 -a -s -T 1

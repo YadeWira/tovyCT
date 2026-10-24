@@ -98,7 +98,7 @@ int main(int argc, char **argv)
 
         if (method == 0)
             body = off + 20;
-        else if (method == 1)
+        else if (method == 1 || method == 2)
         {
             uint32_t nsamples = rd32(comp + off + 32);
             body = off + 20 + 16 + (size_t)nsamples * 4;
@@ -106,7 +106,8 @@ int main(int argc, char **argv)
         else
             break;
 
-        if (method == 1 && payload > 0 && body + payload <= (size_t)complen)
+        if ((method == 1 || method == 2) && payload > 0 &&
+            body + payload <= (size_t)complen)
         {
             poff = body; plen = payload; pcrc_off = off + 16;
             break;

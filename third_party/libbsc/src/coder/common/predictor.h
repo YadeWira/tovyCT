@@ -99,13 +99,34 @@ public:
         }
     }
 
+/* The mixer's sums and weight updates are 32-bit in upstream libbsc. A
+   hostile stream can push the stretched probabilities and weights far enough
+   to overflow (UBSan, adaptive QLFC fuzzer), which is undefined behaviour even
+   though the result is only garbage that the block CRC rejects. Do the
+   arithmetic in 64 bits and clamp to the range the mixer expects. */
+static INLINE int bsc_mix_shift(int s0, int w0, int s1, int w1, int s2, int w2)
+{
+    long long v = ((long long)s0 * w0 + (long long)s1 * w1 + (long long)s2 * w2) >> 17;
+    if (v < -2047) v = -2047;
+    if (v >  2047) v =  2047;
+    return (int)v;
+}
+
+static INLINE int bsc_mix_weight(int weight, int learningRate, int eps, int stretched)
+{
+    long long v = (long long)weight - (((long long)learningRate * eps * stretched) >> 16);
+    if (v >  (1 << 24)) v =  (1 << 24);
+    if (v < -(1 << 24)) v = -(1 << 24);
+    return (int)v;
+}
+
     INLINE int Mixup(const int probability0, const int probability1, const int probability2)
     {
         stretchedProbability0 = bsc_stretch(probability0);
         stretchedProbability1 = bsc_stretch(probability1);
         stretchedProbability2 = bsc_stretch(probability2);
 
-        short stretchedProbability = (stretchedProbability0 * weight0 + stretchedProbability1 * weight1 + stretchedProbability2 * weight2) >> 17;
+        short stretchedProbability = (short)bsc_mix_shift(stretchedProbability0, weight0, stretchedProbability1, weight1, stretchedProbability2, weight2);
 
         if (stretchedProbability < -2047) stretchedProbability = -2047;
         if (stretchedProbability >  2047) stretchedProbability =  2047;
@@ -127,7 +148,7 @@ public:
         const short stretchedProbability1 = bsc_stretch(probability1);
         const short stretchedProbability2 = bsc_stretch(probability2);
 
-        short stretchedProbability = (stretchedProbability0 * weight0 + stretchedProbability1 * weight1 + stretchedProbability2 * weight2) >> 17;
+        short stretchedProbability = (short)bsc_mix_shift(stretchedProbability0, weight0, stretchedProbability1, weight1, stretchedProbability2, weight2);
 
         if (stretchedProbability < -2047) stretchedProbability = -2047;
         if (stretchedProbability >  2047) stretchedProbability =  2047;
@@ -143,8 +164,8 @@ public:
 
         const int eps = mixedProbability - 4095;
 
-        weight0 -= (learningRate0 * eps * stretchedProbability0) >> 16;
-        weight1 -= (learningRate1 * eps * stretchedProbability1) >> 16;
+        weight0 = bsc_mix_weight(weight0, learningRate0, eps, stretchedProbability0);
+        weight1 = bsc_mix_weight(weight1, learningRate1, eps, stretchedProbability1);
         weight2 -= (learningRate2 * eps * stretchedProbability2) >> 16;
 
         return mixedProbability;
@@ -159,7 +180,7 @@ public:
         const short stretchedProbability1 = bsc_stretch(probability1);
         const short stretchedProbability2 = bsc_stretch(probability2);
 
-        short stretchedProbability = (stretchedProbability0 * weight0 + stretchedProbability1 * weight1 + stretchedProbability2 * weight2) >> 17;
+        short stretchedProbability = (short)bsc_mix_shift(stretchedProbability0, weight0, stretchedProbability1, weight1, stretchedProbability2, weight2);
 
         if (stretchedProbability < -2047) stretchedProbability = -2047;
         if (stretchedProbability >  2047) stretchedProbability =  2047;
@@ -175,8 +196,8 @@ public:
 
         const int eps = mixedProbability - 1;
 
-        weight0 -= (learningRate0 * eps * stretchedProbability0) >> 16;
-        weight1 -= (learningRate1 * eps * stretchedProbability1) >> 16;
+        weight0 = bsc_mix_weight(weight0, learningRate0, eps, stretchedProbability0);
+        weight1 = bsc_mix_weight(weight1, learningRate1, eps, stretchedProbability1);
         weight2 -= (learningRate2 * eps * stretchedProbability2) >> 16;
 
         return mixedProbability;
@@ -191,8 +212,8 @@ public:
 
         const int eps = mixedProbability - 4095;
 
-        weight0 -= (learningRate0 * eps * stretchedProbability0) >> 16;
-        weight1 -= (learningRate1 * eps * stretchedProbability1) >> 16;
+        weight0 = bsc_mix_weight(weight0, learningRate0, eps, stretchedProbability0);
+        weight1 = bsc_mix_weight(weight1, learningRate1, eps, stretchedProbability1);
         weight2 -= (learningRate2 * eps * stretchedProbability2) >> 16;
     };
 
@@ -205,8 +226,8 @@ public:
 
         const int eps = mixedProbability - 1;
 
-        weight0 -= (learningRate0 * eps * stretchedProbability0) >> 16;
-        weight1 -= (learningRate1 * eps * stretchedProbability1) >> 16;
+        weight0 = bsc_mix_weight(weight0, learningRate0, eps, stretchedProbability0);
+        weight1 = bsc_mix_weight(weight1, learningRate1, eps, stretchedProbability1);
         weight2 -= (learningRate2 * eps * stretchedProbability2) >> 16;
     };
 

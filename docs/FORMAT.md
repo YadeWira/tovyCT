@@ -36,7 +36,7 @@ Each block is a 20-byte header followed by its payload:
 |---|---|---|
 | 0 | 4 | uncompressed size of this block (1..block size) |
 | 4 | 4 | payload size |
-| 8 | 4 | method: `0` = stored, `1` = BWT + QLFC |
+| 8 | 4 | method: `0` = stored, `1` = BWT + QLFC static, `2` = BWT + QLFC adaptive |
 | 12 | 4 | CRC-32C of the uncompressed block |
 | 16 | 4 | CRC-32C of the payload bytes |
 
@@ -47,9 +47,12 @@ The payload CRC is therefore the CRC of the same bytes as the block CRC. The
 encoder uses this method when the compressed form plus its headers would not be
 smaller.
 
-### Method 1, BWT + QLFC
+### Methods 1 and 2, BWT + QLFC
 
-The block header is followed by a 16-byte extension:
+Method 1 and method 2 have exactly the same layout. They differ only in the
+QLFC variant used for the payload: method 1 uses libbsc's static coder and
+method 2 its adaptive coder (about 1-2 % smaller and slower). The block header
+is followed by a 16-byte extension:
 
 | offset | size | field |
 |---|---|---|
@@ -60,8 +63,9 @@ The block header is followed by a 16-byte extension:
 
 Then `sample count` u32 sample rows, then the payload.
 
-- **Sample count** is `ceil(BWT size / 4096)`. The decoder rejects any other
-  value.
+- **Sample count** is either 0 or `ceil(BWT size / 4096)`. Zero means no sample
+  rows follow: the decoder must invert the BWT serially from the primary index.
+  A non-zero value must match `ceil(BWT size / 4096)` exactly.
 - **Samples.** `samples[k]` is the LF-mapping row, in the sentinel-extended BWT,
   from which to start reconstructing the chunk that ends at output position
   `min((k + 1) * 4096, N) - 1`. The last sample is 0: the final chunk ends at the
@@ -72,9 +76,10 @@ Then `sample count` u32 sample rows, then the payload.
   more slowly.
 - **Primary index** is the BWT row of the rotation that starts at position 0.
 - **Payload** is the QLFC (quantized local frequency coding) stream produced by
-  libbsc's `bsc_coder_compress` with the static coder. Its internal framing is
-  libbsc's; a decoder must pass the payload length to the coder so it can bound
-  its reads (`bsc_coder_decompress_bounded`).
+  libbsc's `bsc_coder_compress` with the static (method 1) or adaptive (method 2)
+  coder. Its internal framing is libbsc's; a decoder must pass the payload
+  length to the coder so it can bound its reads
+  (`bsc_coder_decompress_bounded`).
 
 The BWT is the cyclic block transform over the whole block of `N` bytes. The
 inverse is the usual LF walk with the sentinel row; `src/c/tvct_kernels.c`
@@ -102,12 +107,13 @@ A decoder must fail cleanly (an error, no output) on any of these:
   size: real data does not compress better than about 1000:1, so a stream whose
   declared total exceeds `input_size * 4096 + 1 MiB` is rejected before any
   buffer is allocated;
-- a block whose uncompressed or payload size exceeds the buffers implied by the
-  block size or the remaining declared total, or a zero size;
+- an unknown method, or a block whose uncompressed or payload size exceeds the
+  buffers implied by the block size or the remaining declared total, or a zero
+  size;
 - a block that would take the decoded total past the declared total, or a stream
   whose decoded total does not match it;
-- sample count inconsistent with the BWT size, a sample row or primary index out
-  of range;
+- a sample count that is neither 0 nor `ceil(BWT size / 4096)`, a sample row or
+  primary index out of range;
 - either CRC mismatch;
 - any error from the entropy decoder (it has its own bounds).
 
@@ -122,12 +128,15 @@ including a cut exactly at a block boundary.
 | total size | 2^63 - 1 bytes |
 | blocks per stream | derived from the total, no separate field |
 | payload per block | block size at most; larger payloads are stored instead |
+| samples | 0 (serial inverse) or one row per 4096 bytes (parallel inverse) |
 
 ## Version history
 
 - **v3**: the stream header carries the total uncompressed size (8 bytes) and a
   flag for unknown sizes, so a truncated stream is detected instead of being
-  accepted as a shorter valid one. The header grew from 8 to 16 bytes.
+  accepted as a shorter valid one. The header grew from 8 to 16 bytes. Methods
+  1 and 2 (static and adaptive QLFC) and the optional sample rows are part of
+  this version.
 - **v2**: BWT + QLFC with per-block CRC-32C and no total size. Rejected by v3
   decoders.
 - **v1**: an MTF + rANS coder from the research phase. Removed.

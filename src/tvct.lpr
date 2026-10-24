@@ -23,15 +23,19 @@ uses
 var
   Quiet: Boolean = False;
   Threads: Int32 = -1;   { -1: decide from the CPU count }
+  Coder: Int32 = CODER_STATIC;
+  NoSamples: Boolean = False;
 
 procedure Usage;
 begin
   WriteLn('usage:');
-  WriteLn('  tvct c <input> [output] [-b MB] [-T N]   compress (default blocks 8 MB)');
+  WriteLn('  tvct c <input> [output] [-b MB] [-T N] [-a] [-s]   compress (default blocks 8 MB)');
   WriteLn('  tvct d <input> [output] [-T N]    decompress');
   WriteLn('  tvct t <input> [-T N]             verify');
   WriteLn('');
   WriteLn('  -T N: worker threads (default: one per CPU, at most 8; -T 1 for one)');
+  WriteLn('  -a:   adaptive QLFC (smaller, slower; default is static)');
+  WriteLn('  -s:   no sample rows (smaller, slower decode; default keeps them)');
   WriteLn('  tvct i <input>                    show header');
 end;
 
@@ -70,7 +74,8 @@ begin
      (SpeedBytes / 1e6) / Secs]));
 end;
 
-function DoCompress(const InPath, OutPath: string; BlockLog: Int32): Boolean;
+function DoCompress(const InPath, OutPath: string; BlockLog, Coder: Int32;
+  UseSamples: Boolean): Boolean;
 var
   Src, Dst: TFileStream;
   Stats: TCodecStats;
@@ -84,9 +89,10 @@ begin
       T0 := Now;
       try
         if Threads > 1 then
-          Result := CompressStreamMT(Src, Dst, BlockLog, Threads, Stats)
+          Result := CompressStreamMT(Src, Dst, BlockLog, Threads, Coder,
+                                     UseSamples, Stats)
         else
-          Result := CompressStream(Src, Dst, BlockLog, Stats);
+          Result := CompressStream(Src, Dst, BlockLog, Coder, UseSamples, Stats);
       except
         on E: Exception do
         begin
@@ -250,6 +256,10 @@ begin
       if Threads > 64 then
         Threads := 64;
     end
+    else if ParamStr(i) = '-a' then
+      Coder := CODER_ADAPTIVE
+    else if ParamStr(i) = '-s' then
+      NoSamples := True
     else if ParamStr(i) = '-b' then
     begin
       Inc(i);
@@ -280,7 +290,8 @@ begin
       begin
         if OutPath = '' then
           OutPath := DefaultOutput(InPath, True);
-        Halt(Ord(not DoCompress(InPath, OutPath, BlockLog)));
+        Halt(Ord(not DoCompress(InPath, OutPath, BlockLog, Coder,
+                                not NoSamples)));
       end;
     'd':
       begin

@@ -42,6 +42,11 @@ function tvct_libsais(T: PByte; SA: PInt32; n: Int32; fs: Int32;
 function libsais_bwt_aux(const T: PByte; U: PByte; A: PInt32; n, fs: Int32;
   freq: PInt32; r: Int32; I: PInt32): Int32; cdecl;
   external name 'libsais_bwt_aux';
+
+{ Plain BWT: the same transform without the auxiliary rows, faster. }
+function libsais_bwt(const T: PByte; U: PByte; A: PInt32; n, fs: Int32;
+  freq: PInt32): Int32; cdecl;
+  external name 'libsais_bwt';
 {$ENDIF}
 
 implementation

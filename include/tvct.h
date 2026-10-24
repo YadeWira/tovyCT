@@ -34,6 +34,14 @@ int64_t tvct_compress(const void *src, size_t src_size,
                       void *dst, size_t dst_cap,
                       int threads, int block_log);
 
+/* Same, choosing the QLFC coder: 1 = static (default), 2 = adaptive.
+ * Adaptive is about 1-2 % smaller and slower. Other values fail with -1.
+ * no_samples: 1 omits the sample rows, which is ~0.1 % smaller and decodes
+ * serially (slower) but compresses faster. 0 keeps them. */
+int64_t tvct_compress_ex(const void *src, size_t src_size,
+                         void *dst, size_t dst_cap,
+                         int threads, int block_log, int coder, int no_samples);
+
 /* Decompresses a stream into dst. threads as above. Returns the number of
  * bytes written, or -1 on a corrupt stream or if dst_cap is too small. */
 int64_t tvct_decompress(const void *src, size_t src_size,

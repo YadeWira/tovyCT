@@ -34,7 +34,12 @@ for f in coder/coder.cpp coder/qlfc/qlfc.cpp coder/qlfc/qlfc_model.cpp \
   clang++ $FLAGS -c "$B/$f" -o "build/fuzz/qlfc/$(basename "$f" .cpp).o"
 done
 clang $FLAGS -c tests/fuzz_qlfc.c -o build/fuzz/qlfc/harness.o
-clang++ -fsanitize=fuzzer,address,undefined build/fuzz/qlfc/*.o -o build/fuzz/fuzz_qlfc
+clang $FLAGS -DQLFC_CODER=2 -c tests/fuzz_qlfc.c -o build/fuzz/qlfc/harness_adapt.o
+CODER_OBJS=$(ls build/fuzz/qlfc/*.o | grep -v harness)
+clang++ -fsanitize=fuzzer,address,undefined $CODER_OBJS \
+  build/fuzz/qlfc/harness.o -o build/fuzz/fuzz_qlfc
+clang++ -fsanitize=fuzzer,address,undefined $CODER_OBJS \
+  build/fuzz/qlfc/harness_adapt.o -o build/fuzz/fuzz_qlfc_adapt
 
 # Fresh seeds from the current format.
 rm -rf build/fuzz/corpus_qlfc
@@ -45,13 +50,25 @@ head -c 65536 /dev/zero > /tmp/tvct-seed-zeros.bin
 ./build/tvct c /tmp/tvct-seed-zeros.bin build/fuzz/corpus_qlfc/zeros.tvct -b 6 >/dev/null
 yes 'the quick brown fox jumps over the lazy dog' | head -c 65536 > /tmp/tvct-seed-text.bin
 ./build/tvct c /tmp/tvct-seed-text.bin build/fuzz/corpus_qlfc/text.tvct -b 6 >/dev/null
+./build/tvct c /tmp/tvct-seed-text.bin build/fuzz/corpus_qlfc/text-adapt.tvct -b 6 -a -s >/dev/null
+./build/tvct c /tmp/tvct-seed-zeros.bin build/fuzz/corpus_qlfc/zeros-adapt.tvct -b 6 -a -s >/dev/null
 for f in build/fuzz/corpus_qlfc/*.tvct; do
   python3 scripts/extract_qlfc_seed.py "$f" build/fuzz/corpus_qlfc >/dev/null
+done
+# Seeds for the adaptive decoder get their own prefix, so they do not collide
+# with the payload-NN.bin of the static streams.
+for f in build/fuzz/corpus_qlfc/text-adapt.tvct build/fuzz/corpus_qlfc/zeros-adapt.tvct; do
+  python3 scripts/extract_qlfc_seed.py "$f" build/fuzz/corpus_qlfc adapt >/dev/null
 done
 # Inputs that found real bugs; keep them as regression seeds.
 cp tests/fixtures/qlfc-*.bin build/fuzz/corpus_qlfc/
 
 ./build/fuzz/fuzz_qlfc -max_total_time="$SECS" -max_len=24000 \
+  -rss_limit_mb=4096 -jobs="$JOBS" -workers="$JOBS" -print_final_stats=1 \
+  build/fuzz/corpus_qlfc
+
+# Same corpus, adaptive QLFC decoder.
+./build/fuzz/fuzz_qlfc_adapt -max_total_time="$SECS" -max_len=24000 \
   -rss_limit_mb=4096 -jobs="$JOBS" -workers="$JOBS" -print_final_stats=1 \
   build/fuzz/corpus_qlfc
 

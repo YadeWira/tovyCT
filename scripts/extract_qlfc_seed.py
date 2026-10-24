@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Extract QLFC payloads from tovyCT streams as fuzzer seeds.
 
-Usage: scripts/extract_qlfc_seed.py stream.tvct outdir/
+Usage: scripts/extract_qlfc_seed.py stream.tvct outdir/ [prefix]
 
-One file per BWT block, named payload-NN.bin. The QLFC decoder fuzzer takes
+One file per BWT block, named PREFIX-NN.bin (prefix defaults to "payload").
+The QLFC decoder fuzzer takes
 these directly: they are real, well-formed arithmetic streams, which random
 bytes almost never are.
 """
@@ -30,16 +31,17 @@ def parse(blob):
 
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) < 3 or len(sys.argv) > 4:
         sys.exit(__doc__)
     blob = open(sys.argv[1], "rb").read()
     outdir = sys.argv[2]
+    prefix = sys.argv[3] if len(sys.argv) == 4 else "payload"
     os.makedirs(outdir, exist_ok=True)
     count = 0
     for orig, payload in parse(blob):
         if orig is None or not payload:
             continue
-        path = os.path.join(outdir, "payload-%02d.bin" % count)
+        path = os.path.join(outdir, "%s-%02d.bin" % (prefix, count))
         open(path, "wb").write(payload)
         count += 1
     print("%d payloads from %s" % (count, sys.argv[1]))

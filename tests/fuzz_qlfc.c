@@ -18,6 +18,11 @@
 
 #define OUTPUT_CAP (1 << 20)
 
+/* 1 = static, 2 = adaptive (build a second binary with -DQLFC_CODER=2). */
+#ifndef QLFC_CODER
+#define QLFC_CODER 1
+#endif
+
 int bsc_coder_init(int features);
 int bsc_coder_decompress_bounded(const unsigned char *input, int inputSize,
                                  unsigned char *output, int outputSize,
@@ -40,6 +45,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         return 0;
 
     bsc_coder_decompress_bounded(data, (int)size, output, OUTPUT_CAP,
-                                 1 /* BSC_CODER_STATIC */, 0);
+                                 QLFC_CODER, 0);
     return 0;
 }

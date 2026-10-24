@@ -131,8 +131,8 @@ begin
   end;
 end;
 
-function tvct_compress(src: PByte; src_size: SizeInt; dst: PByte;
-  dst_cap: SizeInt; threads, block_log: Int32): Int64; cdecl;
+function tvct_compress_ex(src: PByte; src_size: SizeInt; dst: PByte;
+  dst_cap: SizeInt; threads, block_log, coder, no_samples: Int32): Int64; cdecl;
 var
   InS, OutS: TBufferStream;
   St: TCodecStats;
@@ -148,7 +148,8 @@ begin
     if block_log <= 0 then
       block_log := DEFAULT_BLOCK_LOG;
     try
-      if not CompressStreamMT(InS, OutS, block_log, threads, St) then
+      if not CompressStreamMT(InS, OutS, block_log, threads, coder,
+                              no_samples = 0, St) then
         Exit;
     except
       Exit;
@@ -158,6 +159,13 @@ begin
     InS.Free;
     OutS.Free;
   end;
+end;
+
+function tvct_compress(src: PByte; src_size: SizeInt; dst: PByte;
+  dst_cap: SizeInt; threads, block_log: Int32): Int64; cdecl;
+begin
+  Result := tvct_compress_ex(src, src_size, dst, dst_cap, threads, block_log,
+                             CODER_STATIC, 0);
 end;
 
 function tvct_decompress(src: PByte; src_size: SizeInt; dst: PByte;
@@ -192,6 +200,7 @@ exports
   tvct_compress_bound,
   tvct_get_size,
   tvct_compress,
+  tvct_compress_ex,
   tvct_decompress;
 
 begin

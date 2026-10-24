@@ -31,6 +31,16 @@ fi
 if [ -x build/test_payload ]; then
   ./build/test_payload /tmp/tvct-sample.tvct /tmp/tvct-sample.txt
 fi
+
+# Adaptive coder and no sample rows: a different method in the block header and
+# a serial inverse BWT, both reachable from a hostile stream.
+./build/tvct c /tmp/tvct-sample.txt /tmp/tvct-sample-adapt.tvct -b 1 -a -s -T 1
+./build/tvct t /tmp/tvct-sample-adapt.tvct
+./build/tvct d /tmp/tvct-sample-adapt.tvct /tmp/tvct-sample-adapt.out -T 2
+cmp /tmp/tvct-sample.txt /tmp/tvct-sample-adapt.out
+if [ -x build/test_payload ]; then
+  ./build/test_payload /tmp/tvct-sample-adapt.tvct /tmp/tvct-sample.txt
+fi
 ./build/tvct t /tmp/tvct-sample.tvct
 ./build/tvct d /tmp/tvct-sample.tvct /tmp/tvct-sample.out -T 2
 cmp /tmp/tvct-sample.txt /tmp/tvct-sample.out

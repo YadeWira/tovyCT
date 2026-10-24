@@ -46,7 +46,7 @@ each job.
 ## CLI
 
 ```
-tvct c <input> [output] [-b MB] [-T N]   compress (default 8 MiB blocks)
+tvct c <input> [output] [-b MB] [-T N] [-a] [-s]   compress (default 8 MiB blocks)
 tvct d <input> [output] [-T N]           decompress
 tvct t <input>                           verify the CRCs without writing output
 tvct i <input>                           show the header and the original size
@@ -55,6 +55,12 @@ tvct i <input>                           show the header and the original size
 Output defaults to `<input>.tvct` when compressing and the name without that
 suffix when decompressing. `-T 1` forces the sequential path; by default it uses
 one worker per CPU, capped at 8. The compressed bytes do not depend on `-T`.
+
+`-a` selects the adaptive QLFC coder (about 1-2 % smaller, slower) and `-s`
+omits the sample rows (another ~0.1 % smaller and faster to compress, but the
+inverse BWT is serial, so decoding is slower). Both are off by default; with
+`-a -s -b 32` the 85 MB corpus goes from 17.46 % to 16.93 %, in the same range
+as bzip3, at 9.7 MB/s compress and 8.5 MB/s decode on one thread.
 
 ## C API
 
@@ -112,6 +118,7 @@ byte-identical output with the blocks compressed in parallel:
 | tovyCT, one thread (`-T 1`) | 17.46 % | 16.4 MB/s | 30.4 MB/s |
 | **tovyCT, `-T 8`** | **17.46 %** | **62.0 MB/s** | **71.9 MB/s** |
 | **tovyCT, `-T 16`** | **17.46 %** | **72.4 MB/s** | **97.3 MB/s** |
+| tovyCT, max ratio (`-b 32 -a -s`) | 16.93 % | 9.7 MB/s | 8.5 MB/s |
 | bsc 3.3.12, one thread | 17.33 % | 17.5 MB/s | 29.5 MB/s |
 | bzip3 | 16.90 % | 7 MB/s | 9 MB/s |
 | xz -6 | 20.19 % | 6 MB/s | ~80 MB/s |

@@ -44,6 +44,10 @@ const
   DEFAULT_BLOCK_LOG = 23;
   METHOD_RAW = 0;
   METHOD_BWT = 1;
+  METHOD_BWT_ADAPTIVE = 2;
+  { The coder values libbsc uses for the QLFC variants this format allows. }
+  CODER_STATIC = BSC_CODER_STATIC;
+  CODER_ADAPTIVE = BSC_CODER_ADAPTIVE;
   CODEC_HEADER_SIZE = 16;   { magic 4, version, block log, flags, reserved, total u64 }
   BLOCK_HEADER_SIZE = 20;   { orig, payload, method, crc, payload crc }
   BWT_HEADER_EXTRA = 16;
@@ -57,16 +61,16 @@ type
     RawBlocks: Integer;
   end;
 
-function CompressStream(Src, Dst: TStream; BlockLog: Int32;
-  out Stats: TCodecStats): Boolean;
+function CompressStream(Src, Dst: TStream; BlockLog, Coder: Int32;
+  UseSamples: Boolean; out Stats: TCodecStats): Boolean;
 function DecompressStream(Src, Dst: TStream;
   out Stats: TCodecStats): Boolean;
 
 { Same, with the blocks of one chunk compressed or decompressed in parallel.
   Blocks are independent, so the output is byte-identical to the sequential
   path; Threads <= 1 uses it. }
-function CompressStreamMT(Src, Dst: TStream; BlockLog, Threads: Int32;
-  out Stats: TCodecStats): Boolean;
+function CompressStreamMT(Src, Dst: TStream; BlockLog, Threads, Coder: Int32;
+  UseSamples: Boolean; out Stats: TCodecStats): Boolean;
 function DecompressStreamMT(Src, Dst: TStream; Threads: Int32;
   out Stats: TCodecStats): Boolean;
 
@@ -80,7 +84,8 @@ type
   TBlockJob = record
     Src, Payload, OutBuf: PByte;
     Samples: PInt32;
-    N, PayloadLen, BwtSize, Primary, NSamples: Int32;
+    N, PayloadLen, BwtSize, Primary, NSamples, Coder: Int32;
+    UseSamples: Boolean;
     Crc: LongWord;
     Raw, Ok: Boolean;
   end;
@@ -97,10 +102,11 @@ type
   end;
 
 function CompressBlock(const Src: PByte; N: Int32; Dst: PByte; DstCap: Int32;
-  Samples: PInt32; out BwtSize, Primary, NSamples: Int32): Int32; forward;
+  Samples: PInt32; Coder: Int32; UseSamples: Boolean;
+  out BwtSize, Primary, NSamples: Int32): Int32; forward;
 function DecompressBlock(const Payload: PByte; PayloadLen, OrigSize: Int32;
   BwtSize, Primary, NSamples: Int32; const Samples: PInt32;
-  Dst: PByte): Boolean; forward;
+  Coder: Int32; Dst: PByte): Boolean; forward;
 
 var
   BscReady: Boolean = False;
@@ -120,8 +126,8 @@ begin
     begin
       FJob^.Crc := Crc32c(0, FJob^.Src[0], FJob^.N);
       FJob^.PayloadLen := CompressBlock(FJob^.Src, FJob^.N, FJob^.Payload,
-        FJob^.N + 4096, FJob^.Samples, FJob^.BwtSize, FJob^.Primary,
-        FJob^.NSamples);
+        FJob^.N + 4096, FJob^.Samples, FJob^.Coder, FJob^.UseSamples,
+        FJob^.BwtSize, FJob^.Primary, FJob^.NSamples);
       FJob^.Raw := (FJob^.PayloadLen < 0) or
         (FJob^.PayloadLen + BWT_HEADER_EXTRA + FJob^.NSamples * 4 + 16 >= FJob^.N);
       FJob^.Ok := True;
@@ -129,7 +135,7 @@ begin
     else
       FJob^.Ok := DecompressBlock(FJob^.Payload, FJob^.PayloadLen, FJob^.N,
         FJob^.BwtSize, FJob^.Primary, FJob^.NSamples, FJob^.Samples,
-        FJob^.OutBuf);
+        FJob^.Coder, FJob^.OutBuf);
   except
     FJob^.Ok := False;
   end;
@@ -267,7 +273,8 @@ begin
 end;
 
 function CompressBlock(const Src: PByte; N: Int32; Dst: PByte; DstCap: Int32;
-  Samples: PInt32; out BwtSize, Primary, NSamples: Int32): Int32;
+  Samples: PInt32; Coder: Int32; UseSamples: Boolean;
+  out BwtSize, Primary, NSamples: Int32): Int32;
 var
   BwtBuf: PByte;
   SA: PInt32;
@@ -281,22 +288,35 @@ begin
   GetMem(BwtBuf, N + 1);
   try
 {$IFDEF TVCT_LIBSAIS}
-    { One pass gives the BWT, the primary index and the sample rows. }
-    if libsais_bwt_aux(Src, BwtBuf, SA, N, 0, nil, SAMPLE_RATE, Samples) < 0 then
-      Exit;
-    Primary := Samples[0];
-    NSamples := (N + SAMPLE_RATE - 1) div SAMPLE_RATE;
-    Move(Samples[1], Samples[0], (NSamples - 1) * SizeOf(Int32));
-    Samples[NSamples - 1] := 0;
+    if UseSamples then
+    begin
+      { One pass gives the BWT, the primary index and the sample rows. }
+      if libsais_bwt_aux(Src, BwtBuf, SA, N, 0, nil, SAMPLE_RATE, Samples) < 0 then
+        Exit;
+      Primary := Samples[0];
+      NSamples := (N + SAMPLE_RATE - 1) div SAMPLE_RATE;
+      Move(Samples[1], Samples[0], (NSamples - 1) * SizeOf(Int32));
+      Samples[NSamples - 1] := 0;
+    end
+    else
+    begin
+      Primary := libsais_bwt(Src, BwtBuf, SA, N, 0, nil);
+      if Primary < 0 then
+        Exit;
+      NSamples := 0;
+    end;
 {$ELSE}
     SaisBuildSA(Src, N, SA);
     BwtForward(Src, N, SA, BwtBuf, Primary);
-    BuildSamples(SA, N, Samples, NSamples);
+    if UseSamples then
+      BuildSamples(SA, N, Samples, NSamples)
+    else
+      NSamples := 0;
 {$ENDIF}
 
     if DstCap < N then
       Exit;
-    R := bsc_coder_compress(BwtBuf, Dst, N, BSC_CODER_STATIC, 0);
+    R := bsc_coder_compress(BwtBuf, Dst, N, Coder, 0);
     if R <= 0 then
       Exit;
     Result := R;
@@ -308,7 +328,7 @@ end;
 
 function DecompressBlock(const Payload: PByte; PayloadLen, OrigSize: Int32;
   BwtSize, Primary, NSamples: Int32; const Samples: PInt32;
-  Dst: PByte): Boolean;
+  Coder: Int32; Dst: PByte): Boolean;
 var
   BwtBuf: PByte;
   R, k: Int32;
@@ -316,21 +336,26 @@ begin
   Result := False;
   if (BwtSize <= 0) or (BwtSize > OrigSize) then
     Exit;
-  if NSamples <> (BwtSize + SAMPLE_RATE - 1) div SAMPLE_RATE then
-    Exit;
+  { Zero sample rows mean "decode serially": the kernel then walks the LF
+    mapping from the primary index, slower but without the 0.1 % table. }
+  if NSamples <> 0 then
+  begin
+    if NSamples <> (BwtSize + SAMPLE_RATE - 1) div SAMPLE_RATE then
+      Exit;
+    for k := 0 to NSamples - 1 do
+      if (Samples[k] < 0) or (Samples[k] > BwtSize) then
+        Exit;
+  end;
   { Everything that indexes the BWT or the LF table must be in range before any
     buffer is touched: this is the only place a corrupt stream can get through. }
   if (Primary < 0) or (Primary > BwtSize) then
     Exit;
-  for k := 0 to NSamples - 1 do
-    if (Samples[k] < 0) or (Samples[k] > BwtSize) then
-      Exit;
 
   GetMem(BwtBuf, BwtSize + 1);
   try
     if GetEnvironmentVariable('TVCT_DEBUG') <> '' then WriteLn(StdErr, 'dbg: bsc decode start');
     R := bsc_coder_decompress_bounded(Payload, PayloadLen, BwtBuf, BwtSize,
-                                      BSC_CODER_STATIC, 0);
+                                      Coder, 0);
     if GetEnvironmentVariable('TVCT_DEBUG') <> '' then WriteLn(StdErr, 'dbg: bsc decode done ', R);
     if R <> BwtSize then
       Exit;
@@ -342,14 +367,14 @@ begin
   end;
 end;
 
-function CompressStream(Src, Dst: TStream; BlockLog: Int32;
-  out Stats: TCodecStats): Boolean;
+function CompressStream(Src, Dst: TStream; BlockLog, Coder: Int32;
+  UseSamples: Boolean; out Stats: TCodecStats): Boolean;
 var
   Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
   SrcBuf, Payload: PByte;
   Samples: PInt32;
-  BlockSize, N, PayloadLen, BwtSize, Primary, NSamples, i: Int32;
+  BlockSize, N, PayloadLen, BwtSize, Primary, NSamples, i, Method: Int32;
   Crc: LongWord;
   Raw: Boolean;
   Total: Int64;
@@ -364,6 +389,11 @@ begin
 
   if (BlockLog < 16) or (BlockLog > 26) then   { the header allows 64 MiB }
     Exit;
+  if (Coder <> CODER_STATIC) and (Coder <> CODER_ADAPTIVE) then
+    Exit;
+  Method := METHOD_BWT;
+  if Coder = CODER_ADAPTIVE then
+    Method := METHOD_BWT_ADAPTIVE;
   BlockSize := 1 shl BlockLog;
 
   Known := False;
@@ -390,7 +420,8 @@ begin
 
       Crc := Crc32c(0, SrcBuf[0], N);
       PayloadLen := CompressBlock(SrcBuf, N, Payload, BlockSize + 4096,
-                                  Samples, BwtSize, Primary, NSamples);
+                                  Samples, Coder, UseSamples, BwtSize, Primary,
+                                  NSamples);
       Raw := (PayloadLen < 0) or
              (PayloadLen + BWT_HEADER_EXTRA + NSamples * 4 + 16 >= N);
       if Raw then
@@ -409,7 +440,7 @@ begin
       begin
         PutU32(@Blk[0], LongWord(N));
         PutU32(@Blk[4], LongWord(PayloadLen));
-        PutU32(@Blk[8], LongWord(METHOD_BWT));
+        PutU32(@Blk[8], LongWord(Method));
         PutU32(@Blk[12], Crc);
         PutU32(@Blk[16], Crc32c(0, Payload[0], PayloadLen));
         Dst.WriteBuffer(Blk[0], BLOCK_HEADER_SIZE);
@@ -418,7 +449,8 @@ begin
         PutU32(@Blk[8], 0);
         PutU32(@Blk[12], LongWord(NSamples));
         Dst.WriteBuffer(Blk[0], BWT_HEADER_EXTRA);
-        Dst.WriteBuffer(Samples[0], NSamples * SizeOf(Int32));
+        if NSamples > 0 then
+          Dst.WriteBuffer(Samples[0], NSamples * SizeOf(Int32));
         Dst.WriteBuffer(Payload[0], PayloadLen);
         Inc(Stats.OutBytes, BLOCK_HEADER_SIZE + BWT_HEADER_EXTRA +
             NSamples * 4 + PayloadLen);
@@ -440,7 +472,7 @@ var
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
   Buf, OutBuf, Samples: PByte;
   BlockSize, OrigSize, PayloadLen, Method, BwtSize, Primary, NSamples,
-    i, MaxSamples, BlockLog, AllocSize: Int32;
+    i, MaxSamples, BlockLog, AllocSize, Coder: Int32;
   Crc, PayloadCrc: LongWord;
   Total, Decoded, MaxTotal: Int64;
   Known: Boolean;
@@ -499,20 +531,24 @@ begin
         if Crc32c(0, OutBuf[0], OrigSize) <> PayloadCrc then
           Exit;
       end
-      else if Method = METHOD_BWT then
+      else if (Method = METHOD_BWT) or (Method = METHOD_BWT_ADAPTIVE) then
       begin
+        Coder := CODER_STATIC;
+        if Method = METHOD_BWT_ADAPTIVE then
+          Coder := CODER_ADAPTIVE;
         ReadExact(Src, @Blk[0], BWT_HEADER_EXTRA);
         BwtSize := Int32(GetU32(@Blk[0]));
         Primary := Int32(GetU32(@Blk[4]));
         NSamples := Int32(GetU32(@Blk[12]));
-        if (NSamples <= 0) or (NSamples > MaxSamples) then
+        if (NSamples < 0) or (NSamples > MaxSamples) then
           Exit;
-        ReadExact(Src, Samples, NSamples * SizeOf(Int32));
+        if NSamples > 0 then
+          ReadExact(Src, Samples, NSamples * SizeOf(Int32));
         ReadExact(Src, Buf, PayloadLen);
         if Crc32c(0, Buf[0], PayloadLen) <> PayloadCrc then
           Exit;
         if not DecompressBlock(Buf, PayloadLen, OrigSize, BwtSize, Primary,
-                               NSamples, PInt32(Samples), OutBuf) then
+                               NSamples, PInt32(Samples), Coder, OutBuf) then
           Exit;
       end
       else
@@ -539,14 +575,14 @@ begin
 end;
 
 
-function CompressStreamMT(Src, Dst: TStream; BlockLog, Threads: Int32;
-  out Stats: TCodecStats): Boolean;
+function CompressStreamMT(Src, Dst: TStream; BlockLog, Threads, Coder: Int32;
+  UseSamples: Boolean; out Stats: TCodecStats): Boolean;
 var
   Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
   Jobs: array of TBlockJob;
   Workers: array of TBlockWorker;
-  BlockSize, count, i, MaxSamples: Int32;
+  BlockSize, count, i, MaxSamples, Method: Int32;
   Total: Int64;
   Known: Boolean;
 begin
@@ -556,9 +592,14 @@ begin
   Stats.Blocks := 0;
   Stats.RawBlocks := 0;
   if Threads <= 1 then
-    Exit(CompressStream(Src, Dst, BlockLog, Stats));
+    Exit(CompressStream(Src, Dst, BlockLog, Coder, UseSamples, Stats));
   if (BlockLog < 16) or (BlockLog > 26) then   { the header allows 64 MiB }
     Exit;
+  if (Coder <> CODER_STATIC) and (Coder <> CODER_ADAPTIVE) then
+    Exit;
+  Method := METHOD_BWT;
+  if Coder = CODER_ADAPTIVE then
+    Method := METHOD_BWT_ADAPTIVE;
   EnsureBsc;
   BlockSize := 1 shl BlockLog;
   MaxSamples := BlockSize div SAMPLE_RATE + 2;
@@ -581,6 +622,8 @@ begin
     Jobs[i].Src := GetMem(BlockSize);
     Jobs[i].Payload := GetMem(BlockSize + 4096);
     Jobs[i].Samples := GetMem(MaxSamples * SizeOf(Int32));
+    Jobs[i].Coder := Coder;
+    Jobs[i].UseSamples := UseSamples;
     Jobs[i].Ok := False;
   end;
   try
@@ -625,7 +668,7 @@ begin
         begin
           PutU32(@Blk[0], LongWord(Jobs[i].N));
           PutU32(@Blk[4], LongWord(Jobs[i].PayloadLen));
-          PutU32(@Blk[8], LongWord(METHOD_BWT));
+          PutU32(@Blk[8], LongWord(Method));
           PutU32(@Blk[12], Jobs[i].Crc);
           PutU32(@Blk[16], Crc32c(0, Jobs[i].Payload[0], Jobs[i].PayloadLen));
           Dst.WriteBuffer(Blk[0], BLOCK_HEADER_SIZE);
@@ -733,17 +776,21 @@ begin
           Jobs[count].Raw := True;
           Jobs[count].Ok := True;
         end
-        else if Method = METHOD_BWT then
+        else if (Method = METHOD_BWT) or (Method = METHOD_BWT_ADAPTIVE) then
         begin
+          Jobs[count].Coder := CODER_STATIC;
+          if Method = METHOD_BWT_ADAPTIVE then
+            Jobs[count].Coder := CODER_ADAPTIVE;
           ReadExact(Src, @Blk[0], BWT_HEADER_EXTRA);
           Jobs[count].BwtSize := Int32(GetU32(@Blk[0]));
           Jobs[count].Primary := Int32(GetU32(@Blk[4]));
           Jobs[count].NSamples := Int32(GetU32(@Blk[12]));
-          if (Jobs[count].NSamples <= 0) or (Jobs[count].NSamples > MaxSamples) then
+          if (Jobs[count].NSamples < 0) or (Jobs[count].NSamples > MaxSamples) then
             Exit;
           if Jobs[count].PayloadLen > AllocSize + 4096 then
             Exit;
-          ReadExact(Src, PByte(Jobs[count].Samples), Jobs[count].NSamples * SizeOf(Int32));
+          if Jobs[count].NSamples > 0 then
+            ReadExact(Src, PByte(Jobs[count].Samples), Jobs[count].NSamples * SizeOf(Int32));
           ReadExact(Src, Jobs[count].Payload, Jobs[count].PayloadLen);
           if Crc32c(0, Jobs[count].Payload[0], Jobs[count].PayloadLen) <> PayloadCrc then
             Exit;
@@ -834,11 +881,11 @@ begin
       Inc(Result, OrigSize);
       Src.Seek(PayloadLen, soCurrent);
     end
-    else if Method = METHOD_BWT then
+    else if (Method = METHOD_BWT) or (Method = METHOD_BWT_ADAPTIVE) then
     begin
       ReadExact(Src, @Blk[0], BWT_HEADER_EXTRA);
       NSamples := Int32(GetU32(@Blk[12]));
-      if (NSamples <= 0) or (NSamples > (1 shl 27) div SAMPLE_RATE + 2) then
+      if (NSamples < 0) or (NSamples > (1 shl 27) div SAMPLE_RATE + 2) then
         Exit(-1);
       Inc(Result, OrigSize);
       Src.Seek(NSamples * SizeOf(Int32) + PayloadLen, soCurrent);

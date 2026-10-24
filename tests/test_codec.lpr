@@ -32,7 +32,7 @@ var
 begin
   InF := TFileStream.Create(Path, fmOpenRead);
   MidF := TFileStream.Create(Path + '.tvct', fmCreate);
-  Ok := CompressStream(InF, MidF, 23, Stats);
+  Ok := CompressStream(InF, MidF, 23, CODER_STATIC, True, Stats);
   MidF.Free;
   InF.Free;
   Check(Ok, 'stream compress');

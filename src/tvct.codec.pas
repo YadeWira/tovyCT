@@ -370,11 +370,10 @@ end;
 function CompressStream(Src, Dst: TStream; BlockLog, Coder: Int32;
   UseSamples: Boolean; out Stats: TCodecStats): Boolean;
 var
-  Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
   SrcBuf, Payload: PByte;
   Samples: PInt32;
-  BlockSize, N, PayloadLen, BwtSize, Primary, NSamples, i, Method: Int32;
+  BlockSize, N, PayloadLen, BwtSize, Primary, NSamples, Method: Int32;
   Crc: LongWord;
   Raw: Boolean;
   Total: Int64;
@@ -468,11 +467,10 @@ end;
 function DecompressStream(Src, Dst: TStream;
   out Stats: TCodecStats): Boolean;
 var
-  Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
   Buf, OutBuf, Samples: PByte;
   BlockSize, OrigSize, PayloadLen, Method, BwtSize, Primary, NSamples,
-    i, MaxSamples, BlockLog, AllocSize, Coder: Int32;
+    MaxSamples, BlockLog, AllocSize, Coder: Int32;
   Crc, PayloadCrc: LongWord;
   Total, Decoded, MaxTotal: Int64;
   Known: Boolean;
@@ -578,7 +576,6 @@ end;
 function CompressStreamMT(Src, Dst: TStream; BlockLog, Threads, Coder: Int32;
   UseSamples: Boolean; out Stats: TCodecStats): Boolean;
 var
-  Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
   Jobs: array of TBlockJob;
   Workers: array of TBlockWorker;
@@ -700,7 +697,6 @@ end;
 function DecompressStreamMT(Src, Dst: TStream; Threads: Int32;
   out Stats: TCodecStats): Boolean;
 var
-  Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
   Jobs: array of TBlockJob;
   Workers: array of TBlockWorker;
@@ -852,7 +848,6 @@ end;
 
 function StreamDataSize(Src: TStream): Int64;
 var
-  Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
   Blk: array[0..BLOCK_HEADER_SIZE - 1] of Byte;
   OrigSize, PayloadLen, Method, NSamples, BlockLog: Int32;
   Total: Int64;

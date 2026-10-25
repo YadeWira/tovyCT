@@ -8,6 +8,9 @@ build/
 *.dll
 *.exe
 research/model/model
+research/model/model_pg
+research/model/bench_libsais
+research/model/bench_lz
 
 # Corpora and benchmark output
 corpora/

@@ -6,7 +6,10 @@
   MTF and quantized-local-frequency arithmetic coding, which measured 15 %
   smaller than this project's static MTF + rANS on text at comparable speed.
 
-  Source: third_party/libbsc/src (unmodified, see third_party/libbsc/LICENSE).
+  Source: third_party/libbsc/src, with the decoder hardening fixes marked in
+  the source (see README.md, "Decoder safety"; licence in
+  third_party/libbsc/LICENSE). Only the bounded decode entry is bound here:
+  the unbounded one trusts the stream's own block table.
 }
 unit tvct.bsc;
 
@@ -22,15 +25,12 @@ unit tvct.bsc;
 interface
 
 const
-  BSC_CODER_FAST = 3;
   BSC_CODER_STATIC = 1;
   BSC_CODER_ADAPTIVE = 2;
 
 function bsc_coder_init(features: Int32): Int32; cdecl; external name 'bsc_coder_init';
 function bsc_coder_compress(input, output: PByte; n, coder, features: Int32): Int32;
   cdecl; external name 'bsc_coder_compress';
-function bsc_coder_decompress(input, output: PByte; coder, features: Int32): Int32;
-  cdecl; external name 'bsc_coder_decompress';
 
 { Decompress with the input and output sizes the caller knows: the coder
   validates its own block table instead of trusting the stream. }

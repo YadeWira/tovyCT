@@ -199,7 +199,8 @@ for `-sat` measurements only if there is a plausible win.
   29.0/69.3 decomp T1/T8), compact 17.21 %, max 16.95 %. bzip3 16.90 %.
 - Optional pending: BLAKE3-128 digest (pja's unit in
   `/mnt/IA_LAB/compartido/pja-blake3/`, verified), guard-page sandbox,
-  dead-code cleanup (rANS/MTF kernels no longer linked), small-file overhead.
+  small-file overhead. (Dead-code cleanup is done: the rANS/MTF kernels, the
+  unbuilt RLE prefilter and the committed research binaries are gone.)
 
 ## 8. Environment and commands
 

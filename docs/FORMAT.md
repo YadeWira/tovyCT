@@ -83,7 +83,7 @@ Then `sample count` u32 sample rows, then the payload.
 
 The BWT is the cyclic block transform over the whole block of `N` bytes. The
 inverse is the usual LF walk with the sentinel row; `src/c/tvct_kernels.c`
-implements it and walks up to 64 chains at once.
+implements it and walks up to eight chains at once.
 
 ## CRC-32C
 

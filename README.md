@@ -7,7 +7,9 @@ vectorised C kernels for the hot paths.
 tests, and CI on Linux x86-64, Linux AArch64 and macOS AArch64 (plus Windows
 x86/x64 builds validated in virtual machines). The format is specified in
 [`docs/FORMAT.md`](docs/FORMAT.md); the measurements and the design that was
-dropped are in [`docs/DESIGN.md`](docs/DESIGN.md).
+dropped are in [`docs/DESIGN.md`](docs/DESIGN.md). The zpaq-std integration
+thread, its blockers and the pending libbsc hardening package are in
+[`docs/ZPAQ-STD.md`](docs/ZPAQ-STD.md).
 
 ## What it is meant to be
 

@@ -68,8 +68,7 @@ extern "C" {
     /**
     * Decompress a memory block, with the input and output sizes known.
     * Every size and offset in the stream's block table is validated against
-    * them before use; the unbounded version cannot do that because its
-    * signature carries no length.
+    * them before use.
     * @param input       - the input memory block.
     * @param inputSize   - how many bytes of input are valid.
     * @param output      - the output memory block.

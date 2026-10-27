@@ -8,7 +8,7 @@
 This file is a part of bsc and/or libbsc, a program and a library for
 lossless, block-sorting data compression.
 
-   Copyright (c) 2009-2024 Ilya Grebnov <ilya.grebnov@gmail.com>
+   Copyright (c) 2009-2026 Ilya Grebnov <ilya.grebnov@gmail.com>
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -55,9 +55,9 @@ private:
     unsigned int ari_cache;
     unsigned int ari_range;
 
-    /* Bytes, not shorts: the compressed stream has no alignment guarantee, and
-       forming a misaligned unsigned short* is undefined even if the load is
-       done with memcpy. */
+    /* Bytes, not shorts: the compressed stream has no alignment guarantee,
+       and forming a misaligned unsigned short * is undefined. The optional
+       end lets the caller bound the reads. */
     const unsigned char * RESTRICT ari_input;
     const unsigned char * ari_input_end;   /* nullptr: no bound */
     int ari_overrun;
@@ -125,7 +125,7 @@ public:
 
     INLINE bool CheckEOB()
     {
-        return ari_output >= ari_outputEOB;
+        return ari_output + ari_ffnum >= ari_outputEOB;
     }
 
     INLINE void InitEncoder(unsigned char * output, int outputSize)
@@ -217,6 +217,8 @@ public:
         ari_code  = (ari_code << 16) | InputShort();
     };
 
+    INLINE bool Overrun() const { return ari_overrun != 0; }
+
     template <int P = 12> INLINE int PeakBit(int probability)
     {
         if (ari_range < 0x10000)
@@ -268,8 +270,6 @@ public:
         }
         return byte;
     }
-
-    INLINE bool Overrun() const { return ari_overrun != 0; }
 
     INLINE unsigned int DecodeWord()
     {

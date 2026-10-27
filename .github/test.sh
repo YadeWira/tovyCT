@@ -9,6 +9,9 @@ find src -type f -print | LC_ALL=C sort | xargs cat > /tmp/tvct-sample.txt
 ./build/tests/test_sais /tmp/tvct-sample.txt
 ./build/tests/test_bwt /tmp/tvct-sample.txt
 ./build/tests/test_codec /tmp/tvct-sample.txt
+if [ -x build/tests/test_blake3 ]; then
+  ./build/tests/test_blake3 third_party/pjablake3/tests/kat.txt
+fi
 
 if [ -x build/test_api ]; then
   if [ "$(uname -s)" = Darwin ]; then
@@ -16,6 +19,11 @@ if [ -x build/test_api ]; then
   else
     ./build/test_api /tmp/tvct-sample.txt
   fi
+fi
+
+if [ -x build/test_text ]; then
+  ./build/test_text /tmp/tvct-sample.txt
+  ./build/test_text -b 4096 /tmp/tvct-sample.txt
 fi
 
 if [ -x build/test_hostile ]; then
@@ -40,6 +48,32 @@ for p in compact max; do
   cmp /tmp/tvct-sample.txt /tmp/tvct-sample-$p.out
 done
 
+# Text transform. The source sample never takes it, so a generated prose
+# sample does: the stream must contain text blocks, round-trip with several
+# threads, and survive payload mutations along the text path.
+python3 scripts/gen_prose.py 2500000 > /tmp/tvct-prose.txt
+./build/test_text -b 1048576 /tmp/tvct-prose.txt
+./build/tvct c /tmp/tvct-prose.txt /tmp/tvct-prose.tvct -b 1 -T 3 | tee /tmp/tvct-prose.log
+if grep -q ' 0 text)' /tmp/tvct-prose.log; then
+  echo "FAIL: the prose sample produced no text blocks"
+  exit 1
+fi
+./build/tvct d /tmp/tvct-prose.tvct /tmp/tvct-prose.out -T 1
+cmp /tmp/tvct-prose.txt /tmp/tvct-prose.out
+if [ -x build/test_payload ]; then
+  ./build/test_payload /tmp/tvct-prose.tvct /tmp/tvct-prose.txt
+fi
+# BLAKE3 digest: round trip, and the header reports it.
+./build/tvct c /tmp/tvct-prose.txt /tmp/tvct-prose-h.tvct -b 1 -H -T 2
+./build/tvct i /tmp/tvct-prose-h.tvct | grep -q BLAKE3
+./build/tvct d /tmp/tvct-prose-h.tvct /tmp/tvct-prose-h.out -T 3
+cmp /tmp/tvct-prose.txt /tmp/tvct-prose-h.out
+for x in off best; do
+  ./build/tvct c /tmp/tvct-prose.txt /tmp/tvct-prose-x$x.tvct -b 1 -x $x -T 2
+  ./build/tvct d /tmp/tvct-prose-x$x.tvct /tmp/tvct-prose-x$x.out -T 3
+  cmp /tmp/tvct-prose.txt /tmp/tvct-prose-x$x.out
+done
+
 # Adaptive coder and no sample rows: a different method in the block header and
 # a serial inverse BWT, both reachable from a hostile stream.
 ./build/tvct c /tmp/tvct-sample.txt /tmp/tvct-sample-adapt.tvct -b 1 -a -s -T 1
@@ -53,9 +87,15 @@ fi
 ./build/tvct d /tmp/tvct-sample.tvct /tmp/tvct-sample.out -T 2
 cmp /tmp/tvct-sample.txt /tmp/tvct-sample.out
 
-if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum /tmp/tvct-sample.tvct | cut -d' ' -f1 > hash.txt
-else
-  shasum -a 256 /tmp/tvct-sample.tvct | cut -d' ' -f1 > hash.txt
-fi
-echo "compressed sample: $(cat hash.txt)"
+# One line with both hashes: the source sample (no text transform) and the
+# prose sample (text transform, three blocks). CI compares the line across
+# platforms, so both pipelines must give the same bytes everywhere.
+sha() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+echo "sample:$(sha /tmp/tvct-sample.tvct) prose:$(sha /tmp/tvct-prose.tvct)" > hash.txt
+echo "compressed samples: $(cat hash.txt)"

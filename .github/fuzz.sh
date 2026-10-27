@@ -2,6 +2,9 @@
 # Builds and runs the decoder fuzzers.
 #   .github/fuzz.sh [seconds] [jobs]
 #
+# The text transform has its own target, tests/fuzz_text.c, also plain C with
+# full coverage and sanitizers.
+#
 # The main target is tests/fuzz_qlfc.c: the QLFC entropy decoder compiled into
 # the fuzzer with coverage, AddressSanitizer and UBSan. That is the only build
 # where libFuzzer gets feedback from the code it mutates, and the only one where
@@ -51,6 +54,8 @@ head -c 65536 /dev/zero > /tmp/tvct-seed-zeros.bin
 yes 'the quick brown fox jumps over the lazy dog' | head -c 65536 > /tmp/tvct-seed-text.bin
 ./build/tvct c /tmp/tvct-seed-text.bin build/fuzz/corpus_qlfc/text.tvct -b 6 >/dev/null
 ./build/tvct c /tmp/tvct-seed-text.bin build/fuzz/corpus_qlfc/text-adapt.tvct -b 6 -a -s >/dev/null
+python3 scripts/gen_prose.py 300000 > /tmp/tvct-seed-prose.txt
+./build/tvct c /tmp/tvct-seed-prose.txt build/fuzz/corpus_qlfc/prose.tvct -b 1 >/dev/null
 ./build/tvct c /tmp/tvct-seed-zeros.bin build/fuzz/corpus_qlfc/zeros-adapt.tvct -b 6 -a -s >/dev/null
 for f in build/fuzz/corpus_qlfc/*.tvct; do
   python3 scripts/extract_qlfc_seed.py "$f" build/fuzz/corpus_qlfc >/dev/null
@@ -71,6 +76,22 @@ cp tests/fixtures/qlfc-*.bin build/fuzz/corpus_qlfc/
 ./build/fuzz/fuzz_qlfc_adapt -max_total_time="$SECS" -max_len=24000 \
   -rss_limit_mb=4096 -jobs="$JOBS" -workers="$JOBS" -print_final_stats=1 \
   build/fuzz/corpus_qlfc
+
+# Text transform: decoder and encoder round trip, plain C with coverage.
+clang -O1 -g -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
+  tests/fuzz_text.c src/c/tvct_text.c -o build/fuzz/fuzz_text
+rm -rf build/fuzz/corpus_text
+mkdir -p build/fuzz/corpus_text
+cat src/*.pas src/*.lpr > /tmp/tvct-seed-src.txt
+for f in /tmp/tvct-seed-text.bin /tmp/tvct-seed-src.txt /tmp/tvct-seed-prose.txt; do
+  # Round-trip seeds: a 0 mode byte, then the block.
+  { printf '\000'; head -c 60000 "$f"; } > "build/fuzz/corpus_text/rt-$(basename "$f")"
+  # Decode seeds: a transformed block, when the encoder takes the input.
+  ./build/test_text -seed "build/fuzz/corpus_text/dec-$(basename "$f")" "$f" || true
+done
+./build/fuzz/fuzz_text -max_total_time="$SECS" -max_len=70000 \
+  -rss_limit_mb=4096 -jobs="$JOBS" -workers="$JOBS" -print_final_stats=1 \
+  build/fuzz/corpus_text
 
 # Container smoke test: arbitrary bytes through the public API. No coverage
 # feedback (the library is not instrumented), so it only looks for crashes.

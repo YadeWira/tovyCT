@@ -2,7 +2,7 @@ program tvct;
 
 { tovyCT command line.
 
-    tvct c <input> [output] [-b MB]   compress
+    tvct c <input> [output] [options] compress
     tvct d <input> [output]           decompress
     tvct t <input>                    verify
     tvct i <input>                    show the stream header
@@ -25,6 +25,8 @@ var
   Threads: Int32 = -1;   { -1: decide from the CPU count }
   Coder: Int32 = CODER_STATIC;
   NoSamples: Boolean = False;
+  TextMode: Int32 = TEXT_AUTO;
+  WithDigest: Boolean = False;
   Preset: string = '';
   BlockLogSet: Boolean = False;
 
@@ -32,6 +34,7 @@ procedure Usage;
 begin
   WriteLn('usage:');
   WriteLn('  tvct c <input> [output] [-l fast|compact|max] [-b MB] [-T N] [-a] [-s]');
+  WriteLn('                         [-x off|auto|best] [-H]');
   WriteLn('                                    compress (default: -l fast)');
   WriteLn('  tvct d <input> [output] [-T N]    decompress');
   WriteLn('  tvct t <input> [-T N]             verify');
@@ -39,6 +42,9 @@ begin
   WriteLn('  -T N: worker threads (default: one per CPU, at most 8; -T 1 for one)');
   WriteLn('  -a:   adaptive QLFC (smaller, slower; default is static)');
   WriteLn('  -s:   no sample rows (smaller, slower decode; default keeps them)');
+  WriteLn('  -H:   end the stream with a BLAKE3-128 digest of the whole input');
+  WriteLn('  -x:   text transform: auto (default: when it removes a tenth of the');
+  WriteLn('        block), off, or best (compress both ways, keep the smaller)');
   WriteLn('  -l fast:    static, 8 MiB blocks, sample rows (default)');
   WriteLn('  -l compact: static, 16 MiB blocks, sample rows');
   WriteLn('  -l max:     adaptive, no sample rows, 16 MiB blocks');
@@ -66,6 +72,15 @@ begin
     Result := Format('%.2f MiB', [N / (1024 * 1024)]);
 end;
 
+{ Seconds since T0, never zero: Windows' clock ticks every ~15 ms, and FPC
+  there raises on a floating-point division by zero. }
+function Elapsed(T0: TDateTime): Double;
+begin
+  Result := (Now - T0) * SecsPerDay;
+  if Result < 1e-3 then
+    Result := 1e-3;
+end;
+
 procedure Report(const What: string; Stats: TCodecStats; Secs: Double;
   SpeedBytes: Int64);
 var
@@ -75,14 +90,14 @@ begin
     Ratio := 100.0 * Stats.OutBytes / Stats.InBytes
   else
     Ratio := 0;
-  WriteLn(Format('%s: %s -> %s (%.2f%%), %d blocks (%d raw), %.1f MB/s',
+  WriteLn(Format('%s: %s -> %s (%.2f%%), %d blocks (%d raw, %d text), %.1f MB/s',
     [What, HumanBytes(Stats.InBytes), HumanBytes(Stats.OutBytes), Ratio,
-     Stats.Blocks, Stats.RawBlocks,
+     Stats.Blocks, Stats.RawBlocks, Stats.TextBlocks,
      (SpeedBytes / 1e6) / Secs]));
 end;
 
-function DoCompress(const InPath, OutPath: string; BlockLog, Coder: Int32;
-  UseSamples: Boolean): Boolean;
+function DoCompress(const InPath, OutPath: string;
+  const Opts: TCodecOptions): Boolean;
 var
   Src, Dst: TFileStream;
   Stats: TCodecStats;
@@ -95,11 +110,7 @@ begin
     try
       T0 := Now;
       try
-        if Threads > 1 then
-          Result := CompressStreamMT(Src, Dst, BlockLog, Threads, Coder,
-                                     UseSamples, Stats)
-        else
-          Result := CompressStream(Src, Dst, BlockLog, Coder, UseSamples, Stats);
+        Result := CompressStream(Src, Dst, Opts, Threads, Stats);
       except
         on E: Exception do
         begin
@@ -108,7 +119,7 @@ begin
         end;
       end;
       if Result and not Quiet then
-        Report('compressed', Stats, (Now - T0) * SecsPerDay, Stats.InBytes);
+        Report('compressed', Stats, Elapsed(T0), Stats.InBytes);
     finally
       Dst.Free;
     end;
@@ -130,10 +141,7 @@ begin
     try
       T0 := Now;
       try
-        if Threads > 1 then
-          Result := DecompressStreamMT(Src, Dst, Threads, Stats)
-        else
-          Result := DecompressStream(Src, Dst, Stats);
+        Result := DecompressStream(Src, Dst, Threads, Stats);
       except
         on E: Exception do
         begin
@@ -142,7 +150,7 @@ begin
         end;
       end;
       if Result and not Quiet then
-        Report('decompressed', Stats, (Now - T0) * SecsPerDay, Stats.OutBytes);
+        Report('decompressed', Stats, Elapsed(T0), Stats.OutBytes);
     finally
       Dst.Free;
     end;
@@ -167,13 +175,10 @@ begin
     Null := TMemoryStream.Create;
     try
       T0 := Now;
-      if Threads > 1 then
-        Result := DecompressStreamMT(Src, Null, Threads, Stats)
-      else
-        Result := DecompressStream(Src, Null, Stats);
+      Result := DecompressStream(Src, Null, Threads, Stats);
       if Result then
         WriteLn(Format('ok: %d blocks, %s, %.1f MB/s', [Stats.Blocks,
-          HumanBytes(Stats.OutBytes), (Stats.OutBytes / 1e6) / ((Now - T0) * SecsPerDay)]))
+          HumanBytes(Stats.OutBytes), (Stats.OutBytes / 1e6) / Elapsed(T0)]))
       else
         WriteLn(StdErr, 'corrupt stream');
     except
@@ -192,36 +197,31 @@ end;
 procedure DoInfo(const InPath: string);
 var
   F: TFileStream;
-  Hdr: array[0..CODEC_HEADER_SIZE - 1] of Byte;
-  Size: Int64;
-  U: QWord;
-  i: Int32;
+  BlockLog: Int32;
+  Total: Int64;
+  Known, Digest, Ok: Boolean;
 begin
   F := TFileStream.Create(InPath, fmOpenRead or fmShareDenyWrite);
   try
-    Size := F.Size;
-    if Size < CODEC_HEADER_SIZE then
+    try
+      Ok := ReadStreamHeader(F, BlockLog, Total, Known, Digest);
+    except
+      Ok := False;
+    end;
+    if not Ok then
     begin
-      WriteLn(StdErr, 'not a tovyCT stream');
+      WriteLn(StdErr, 'not a tovyCT v', CODEC_VERSION, ' stream');
       Exit;
     end;
-    F.ReadBuffer(Hdr[0], CODEC_HEADER_SIZE);
-    if (Hdr[0] <> Ord('T')) or (Hdr[1] <> Ord('V')) or (Hdr[2] <> Ord('C')) or
-       (Hdr[3] <> Ord('T')) then
-    begin
-      WriteLn(StdErr, 'not a tovyCT stream');
-      Exit;
-    end;
-    WriteLn('format:    tovyCT v', Hdr[4]);
-    WriteLn('block:     ', (1 shl Hdr[5]) shr 20, ' MiB');
-    if (Hdr[6] and 1) <> 0 then
-    begin
-      U := 0;
-      for i := 15 downto 8 do
-        U := (U shl 8) or QWord(Hdr[i]);
-      WriteLn('original:  ', HumanBytes(Int64(U)));
-    end;
-    WriteLn('file size: ', HumanBytes(Size));
+    WriteLn('format:    tovyCT v', CODEC_VERSION);
+    WriteLn('block:     ', HumanBytes(Int64(1) shl BlockLog));
+    if Known then
+      WriteLn('original:  ', HumanBytes(Total))
+    else
+      WriteLn('original:  unknown');
+    if Digest then
+      WriteLn('digest:    BLAKE3-128');
+    WriteLn('file size: ', HumanBytes(F.Size));
   finally
     F.Free;
   end;
@@ -230,6 +230,7 @@ end;
 var
   Cmd, InPath, OutPath: string;
   i, BlockLog, MB: Int32;
+  Opts: TCodecOptions;
 function DefaultThreads: Int32;
 begin
   Result := CpuCount;
@@ -267,6 +268,22 @@ begin
       Coder := CODER_ADAPTIVE
     else if ParamStr(i) = '-s' then
       NoSamples := True
+    else if ParamStr(i) = '-H' then
+      WithDigest := True
+    else if ParamStr(i) = '-x' then
+    begin
+      Inc(i);
+      case LowerCase(ParamStr(i)) of
+        'off': TextMode := TEXT_OFF;
+        'auto': TextMode := TEXT_AUTO;
+        'best': TextMode := TEXT_BEST;
+      else
+        begin
+          Usage;
+          Halt(1);
+        end;
+      end;
+    end
     else if ParamStr(i) = '-l' then
     begin
       Inc(i);
@@ -274,14 +291,17 @@ begin
       if Preset = 'fast' then
       begin
         BlockLog := 23; Coder := CODER_STATIC; NoSamples := False;
+        TextMode := TEXT_AUTO;
       end
       else if Preset = 'compact' then
       begin
         BlockLog := 24; Coder := CODER_STATIC; NoSamples := False;
+        TextMode := TEXT_AUTO;
       end
       else if Preset = 'max' then
       begin
         BlockLog := 24; Coder := CODER_ADAPTIVE; NoSamples := True;
+        TextMode := TEXT_AUTO;
       end
       else
       begin
@@ -340,8 +360,13 @@ begin
       begin
         if OutPath = '' then
           OutPath := DefaultOutput(InPath, True);
-        Halt(Ord(not DoCompress(InPath, OutPath, BlockLog, Coder,
-                                not NoSamples)));
+        Opts := DefaultOptions;
+        Opts.BlockLog := BlockLog;
+        Opts.Coder := Coder;
+        Opts.UseSamples := not NoSamples;
+        Opts.Text := TextMode;
+        Opts.Digest := WithDigest;
+        Halt(Ord(not DoCompress(InPath, OutPath, Opts)));
       end;
     'd':
       begin

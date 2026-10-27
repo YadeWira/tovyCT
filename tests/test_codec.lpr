@@ -32,7 +32,7 @@ var
 begin
   InF := TFileStream.Create(Path, fmOpenRead);
   MidF := TFileStream.Create(Path + '.tvct', fmCreate);
-  Ok := CompressStream(InF, MidF, 23, CODER_STATIC, True, Stats);
+  Ok := CompressStream(InF, MidF, DefaultOptions, 1, Stats);
   MidF.Free;
   InF.Free;
   Check(Ok, 'stream compress');
@@ -41,7 +41,7 @@ begin
 
   MidF := TFileStream.Create(Path + '.tvct', fmOpenRead);
   OutF := TFileStream.Create(Path + '.rt', fmCreate);
-  Ok := DecompressStream(MidF, OutF, Stats);
+  Ok := DecompressStream(MidF, OutF, 1, Stats);
   OutF.Free;
   MidF.Free;
   Check(Ok, 'stream decompress');
@@ -60,6 +60,7 @@ begin
         if A[i] <> B[i] then
         begin
           WriteLn(Format('first mismatch at %d: in %d out %d', [i, A[i], B[i]]));
+          Check(False, 'round-trip content');
           Break;
         end;
     end;

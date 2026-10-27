@@ -25,5 +25,8 @@ corpora/
 # Test output (CI compares the uploaded artifacts, not the tree)
 hash.txt
 
+# libFuzzer worker logs (-jobs writes them to the current directory)
+fuzz-*.log
+
 # Fuzzer regression seeds are small and part of the test suite
 !tests/fixtures/*.bin

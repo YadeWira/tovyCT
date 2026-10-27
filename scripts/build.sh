@@ -85,9 +85,10 @@ for d in $WINLIB; do
 done
 mkdir -p "$OUT/tests" "$OUT/lib" "$OUT/bsc" "$OUT/libsais" "$OUT/units"
 
-# C kernels: decode paths.
+# C kernels: the inverse BWT and the text transform.
 $CC $CFLAGS -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
-$AR rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o"
+$CC $CFLAGS -c src/c/tvct_text.c -o "$OUT/lib/tvct_text.o"
+$AR rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o" "$OUT/lib/tvct_text.o"
 LIBS="$LIBS -Fl$(pwd)/$OUT/lib"
 
 # libbsc coder (C++), the entropy backend.
@@ -113,16 +114,20 @@ fi
 
 for t in tests/test_sais.lpr tests/test_bwt.lpr tests/test_codec.lpr; do
   echo "== $t"
-  $FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
+  $FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" -Futhird_party/pjablake3 -Fi"$(pwd)/third_party/pjablake3" $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
       -FE"$OUT/tests" "$t"
 done
 
+echo "== third_party/pjablake3/tests/test_blake3.pas"
+$FPC -O2 -Futhird_party/pjablake3 -Fi"$(pwd)/third_party/pjablake3" -Fu"$OUT/tests" -FU"$OUT/tests" \
+    -FE"$OUT/tests" third_party/pjablake3/tests/test_blake3.pas
+
 echo "== tvct"
-$FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
+$FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" -Futhird_party/pjablake3 -Fi"$(pwd)/third_party/pjablake3" $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
     -FE"$OUT" src/tvct.lpr
 
 echo "== $SO"
-$FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" $LIBS -Fu"$OUT/units" -FU"$OUT/units" \
+$FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" -Futhird_party/pjablake3 -Fi"$(pwd)/third_party/pjablake3" $LIBS -Fu"$OUT/units" -FU"$OUT/units" \
     -o"$OUT/$SO" src/tvct.api.lpr
 cp include/tvct.h "$OUT/tvct.h"
 
@@ -132,6 +137,7 @@ if [ "$TARGET" = host ] && command -v cc >/dev/null 2>&1; then
     cc -O2 -I"$OUT" "$t" -L"$OUT" -ltvct -Wl,-rpath,"$(pwd)/$OUT" \
        -o "$OUT/$(basename "$t" .c)"
   done
+  cc -O2 tests/test_text.c src/c/tvct_text.c -o "$OUT/test_text"
 fi
 
 echo "built in $OUT"

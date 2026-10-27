@@ -4,30 +4,52 @@
 Usage: scripts/extract_qlfc_seed.py stream.tvct outdir/ [prefix]
 
 One file per BWT block, named PREFIX-NN.bin (prefix defaults to "payload").
-The QLFC decoder fuzzer takes
-these directly: they are real, well-formed arithmetic streams, which random
-bytes almost never are.
+The QLFC decoder fuzzer takes these directly: they are real, well-formed
+arithmetic streams, which random bytes almost never are.
 """
 import os
-import struct
 import sys
+
+SAMPLE_RATE = 4096
+
+
+def varint(blob, off):
+    value, shift = 0, 0
+    while True:
+        b = blob[off]
+        off += 1
+        value |= (b & 0x7F) << shift
+        if not b & 0x80:
+            return value, off
+        shift += 7
 
 
 def parse(blob):
-    off = 16                                  # stream header (v3)
-    while off + 20 <= len(blob):
-        orig, payload, method = struct.unpack_from("<III", blob, off)
+    """Yields (method, payload) for every block of a v4 stream."""
+    if blob[:4] != b"TVCT" or blob[4] != 4:
+        raise SystemExit("not a tovyCT v4 stream")
+    off = 7
+    if blob[6] & 1:
+        _, off = varint(blob, off)
+    while off < len(blob):
+        orig, off = varint(blob, off)
+        method = blob[off]
+        off += 1
+        body, off = varint(blob, off)
         if method == 0:
-            body = off + 20
-            yield None, blob[body:body + payload]
-            off = body + payload
-        elif method == 1:
-            nsamples = struct.unpack_from("<I", blob, off + 32)[0]
-            body = off + 20 + 16 + nsamples * 4
-            yield orig, blob[body:body + payload]
-            off = body + payload
-        else:
-            return
+            off += 4 + body
+            continue
+        off += 8
+        end = off + body
+        pos = off
+        bwt = orig
+        if method & 8:
+            bwt, pos = varint(blob, pos)
+        _, pos = varint(blob, pos)                      # primary
+        if method & 4:
+            pos += 4 * ((bwt + SAMPLE_RATE - 1) // SAMPLE_RATE)
+        yield method, blob[pos:end]
+        off = end
 
 
 def main():
@@ -38,8 +60,8 @@ def main():
     prefix = sys.argv[3] if len(sys.argv) == 4 else "payload"
     os.makedirs(outdir, exist_ok=True)
     count = 0
-    for orig, payload in parse(blob):
-        if orig is None or not payload:
+    for _, payload in parse(blob):
+        if not payload:
             continue
         path = os.path.join(outdir, "%s-%02d.bin" % (prefix, count))
         open(path, "wb").write(payload)

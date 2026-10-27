@@ -3,8 +3,9 @@
  * The libFuzzer target (tests/fuzz_qlfc.c) attacks the entropy decoder with
  * arbitrary bytes, but a random byte stream almost never gets past QLFC's own
  * framing. This test keeps the container valid: it flips bits only inside a
- * real QLFC payload and recomputes that block's payload CRC, so the mutated
- * stream reaches the entropy decoder exactly like a hostile file would.
+ * real block body and recomputes that block's body CRC, so the mutated
+ * stream reaches the BWT header, the entropy decoder and the text transform
+ * exactly like a hostile file would.
  *
  * Invariant: the decoder returns an error or exactly the original file. No
  * crash, no partial output. Run it under valgrind or a sanitizer build for the
@@ -41,16 +42,24 @@ static uint32_t crc32c(uint32_t crc, const unsigned char *p, size_t n)
     return ~crc;
 }
 
-static uint32_t rd32(const unsigned char *p)
-{
-    return (uint32_t)p[0] | (uint32_t)p[1] << 8 |
-           (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
-}
-
 static void wr32(unsigned char *p, uint32_t v)
 {
     p[0] = (unsigned char)v; p[1] = (unsigned char)(v >> 8);
     p[2] = (unsigned char)(v >> 16); p[3] = (unsigned char)(v >> 24);
+}
+
+static uint64_t rdvar(const unsigned char *p, size_t *off)
+{
+    uint64_t v = 0;
+    int shift = 0;
+    for (;;)
+    {
+        unsigned char b = p[(*off)++];
+        v |= (uint64_t)(b & 0x7F) << shift;
+        if (!(b & 0x80))
+            return v;
+        shift += 7;
+    }
 }
 
 static unsigned char *slurp(const char *path, long *len)
@@ -88,42 +97,38 @@ int main(int argc, char **argv)
     comp = slurp(argv[1], &complen);
     orig = slurp(argv[2], &origlen);
 
-    /* Walk the blocks and pick the first compressed (BWT) one. */
-    off = 16;
-    while (off + 20 <= (size_t)complen)
+    /* Walk the blocks (format v4) and pick the first compressed one. The body
+       CRC covers the whole body, so mutations go anywhere in it. */
+    if (complen < 7 || memcmp(comp, "TVCT", 4) != 0 || comp[4] != 4)
     {
-        uint32_t payload = rd32(comp + off + 4);
-        uint32_t method = rd32(comp + off + 8);
-        size_t body;
-
-        if (method == 0)
-            body = off + 20;
-        else if (method == 1 || method == 2)
-        {
-            uint32_t nsamples = rd32(comp + off + 32);
-            body = off + 20 + 16 + (size_t)nsamples * 4;
-        }
-        else
-            break;
-
-        if ((method == 1 || method == 2) && payload > 0 &&
-            body + payload <= (size_t)complen)
-        {
-            poff = body; plen = payload; pcrc_off = off + 16;
-            break;
-        }
-        off = body + payload;
+        fprintf(stderr, "%s is not a v4 stream\n", argv[1]);
+        return 2;
     }
-    if (poff == 0)
+    off = 7;
+    total = 0;
+    if (comp[6] & 1)
+        total = rdvar(comp, &off);
+    while (off < (size_t)complen)
+    {
+        uint64_t orig = rdvar(comp, &off);
+        unsigned method = comp[off++];
+        uint64_t body = rdvar(comp, &off);
+        (void)orig;
+        if (method == 0)
+        {
+            off += 4 + body;
+            continue;
+        }
+        pcrc_off = off + 4;
+        poff = off + 8;
+        plen = (size_t)body;
+        break;
+    }
+    if (poff == 0 || poff + plen > (size_t)complen)
     {
         fprintf(stderr, "no compressed block in %s\n", argv[1]);
         return 2;
     }
-
-    total = 0;
-    if (comp[6] & 1)
-        for (int i = 7; i >= 0; i--)
-            total = (total << 8) | comp[8 + i];
     if (total != (uint64_t)origlen)
     {
         fprintf(stderr, "total %llu != original %ld\n", (unsigned long long)total, origlen);

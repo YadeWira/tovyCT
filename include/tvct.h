@@ -1,6 +1,7 @@
 /* tovyCT - C API.
  *
- * Single mode: BWT + QLFC. Every call is self-contained; blocks are independent.
+ * BWT + QLFC, with an optional text transform. Every call is self-contained;
+ * blocks are independent. Stream format v4 (docs/FORMAT.md).
  *
  * Build: scripts/build.sh --libsais   -> build/libtvct.so, build/tvct.h
  */
@@ -41,6 +42,17 @@ int64_t tvct_compress(const void *src, size_t src_size,
 int64_t tvct_compress_ex(const void *src, size_t src_size,
                          void *dst, size_t dst_cap,
                          int threads, int block_log, int coder, int no_samples);
+
+/* Same, also choosing the text transform and the digest.
+ * text:   0 = off, 1 = when it removes a tenth of the block (default),
+ *         2 = compress both ways and keep the smaller (twice the time).
+ * digest: 1 ends the stream with a BLAKE3-128 digest of the whole input,
+ *         checked on decompression. 0 relies on the per-block CRC-32C.
+ * Other values fail with -1. */
+int64_t tvct_compress2(const void *src, size_t src_size,
+                       void *dst, size_t dst_cap,
+                       int threads, int block_log, int coder, int no_samples,
+                       int text, int digest);
 
 /* Decompresses a stream into dst. threads as above. Returns the number of
  * bytes written, or -1 on a corrupt stream or if dst_cap is too small. */

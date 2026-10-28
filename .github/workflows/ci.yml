@@ -68,8 +68,14 @@ jobs:
       - name: Add the toolchains to PATH
         shell: pwsh
         run: |
-          "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
-          "C:\msys64\mingw64\bin"         | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+          "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+          Get-ChildItem C:\tools\freepascal -Recurse -Filter fpc.exe |
+            ForEach-Object { Split-Path $_.FullName } |
+            Sort-Object -Descending -Unique |
+            Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+      - name: FPC banner
+        shell: bash
+        run: fpc -iV
       - name: Build
         shell: bash
         run: ./scripts/build.sh --libsais --portable --target win-native

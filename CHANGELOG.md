@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **Faster decoding and compression, same bytes.** CRC-32C now uses the
+  hardware instruction (SSE4.2, AArch64 `crc32cd`) with a slicing-by-8 fallback:
+  compress +8 %, decode +13 %. The QLFC decoder is also built for AVX and picked
+  at run time (decode +4 %; the stage itself +23 %), and the decode scratch
+  keeps its guard pages across blocks instead of mapping them per block
+  (+2 %). End to end on the 85 MiB corpus: 16.4 -> 18.0 MB/s compress,
+  30.0 -> 31.5 MB/s decode, with the compressed bytes unchanged.
+- `scripts/build.sh --profile` builds with `-O3 -g` for `perf` and callgrind.
+- [`docs/V5-STUDY.md`](docs/V5-STUDY.md): the profiling data behind the above,
+  the optimisations that measured worse and were reverted, and what a v5 could
+  carry (segmented QLFC at 0.04 points, block size that follows the input).
+
 ## 1.0.0 — 2026-10-28
 
 The format is frozen: any 1.0 build decodes any 1.0 stream, on any of the six

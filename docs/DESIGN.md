@@ -342,6 +342,12 @@ so the decoder walks eight independent chains instead of one serial one.
   Latin books 0.05-0.15 points, while Spanish and one French book gained 0.02.
   The BWT already models those words; a code that saves bytes before it does not
   save bits after it. Reverted, and the format never carried it.
+- **Speed for a future v5.** [`V5-STUDY.md`](V5-STUDY.md) has the profiles, the
+  byte-identical wins that landed (hardware CRC-32C, an AVX QLFC decoder the
+  upstream build never compiles, reused guard scratch) and the measured cost of
+  the format-level options: segmented QLFC costs 0.04 points for two streams,
+  and a block size that follows the input buys twice the decode throughput on
+  medium files at 0.5 points.
 - **Format v4 is frozen at 1.0.** Any 1.0 build decodes any 1.0 stream on any
   of the six targets, and the compressed bytes are identical across them. A
   change that needs new syntax, a new transform code or a different header

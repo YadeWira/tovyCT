@@ -65,6 +65,7 @@ page.
   [Decoder safety](https://github.com/YadeWira/tovyCT/wiki/Decoder-safety)
 - **Format specification** — [`docs/FORMAT.md`](docs/FORMAT.md)
 - **Design log and measurements** — [`docs/DESIGN.md`](docs/DESIGN.md)
+- **Studies for a v5 (speed work)** — [`docs/V5-STUDY.md`](docs/V5-STUDY.md)
 - **Changelog** — [`CHANGELOG.md`](CHANGELOG.md)
 - **C header** — [`include/tvct.h`](include/tvct.h)
 

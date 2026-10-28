@@ -202,8 +202,14 @@ $CXX $CFLAGS -c "$BSC/coder/qlfc/qlfc.cpp" -o "$OUT/bsc/qlfc.o"
 case "$($CC -dumpmachine 2>/dev/null)" in
   x86_64*|i[3-6]86*)
     $CXX $CFLAGS -mavx -c "$BSC/coder/qlfc/qlfc.cpp" -o "$OUT/bsc/qlfc_avx.o"
-    "$NM" -g --defined-only "$OUT/bsc/qlfc_avx.o" | awk '{print $3}' \
-      | sed 's/.*/& tvct_avx_&/' > "$OUT/bsc/qlfc_avx.syms"
+    # Keep the platform's C prefix (i386 COFF prepends an underscore) so the
+    # renamed symbol matches what a C declaration links against.
+    "$NM" -g --defined-only "$OUT/bsc/qlfc_avx.o" | awk '
+      {
+        n = $3; lead = ""; base = n
+        if (substr(n, 1, 1) == "_") { lead = "_"; base = substr(n, 2) }
+        printf "%s %stvct_avx_%s\n", n, lead, base
+      }' > "$OUT/bsc/qlfc_avx.syms"
     "$OBJCOPY" --redefine-syms="$OUT/bsc/qlfc_avx.syms" "$OUT/bsc/qlfc_avx.o"
     QLFC_OBJS="$OUT/bsc/qlfc_avx.o"
     QLFC_DEF="-DTVCT_QLFC_AVX"

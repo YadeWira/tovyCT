@@ -30,6 +30,9 @@ var
   WithDigest: Boolean = False;
   Preset: string = '';
   BlockLogSet: Boolean = False;
+  AutoBlock: Boolean = False;
+  Target: Int64;
+  Log: Int32;
 
 procedure Usage;
 begin
@@ -46,6 +49,9 @@ begin
   WriteLn('  -H:   end the stream with a BLAKE3-128 digest of the whole input');
   WriteLn('  -x:   text transform: auto (default: when it removes a tenth of the');
   WriteLn('        block), off, or best (compress both ways, keep the smaller)');
+  WriteLn('  -b auto:    size the blocks from the input and the threads, so that');
+  WriteLn('              every worker gets one (trades ratio for speed on medium');
+  WriteLn('              files; the preset sets the cap)');
   WriteLn('  -l fast:    static, 8 MiB blocks, sample rows (default)');
   WriteLn('  -l compact: static, 16 MiB blocks, sample rows');
   WriteLn('  -l max:     adaptive, no sample rows, 16 MiB blocks');
@@ -345,6 +351,13 @@ begin
     else if ParamStr(i) = '-b' then
     begin
       Inc(i);
+      if LowerCase(ParamStr(i)) = 'auto' then
+      begin
+        AutoBlock := True;
+        BlockLogSet := False;
+        Inc(i);
+        Continue;
+      end;
       MB := StrToIntDef(ParamStr(i), 8);
       if (MB < 1) or (MB > 64) then
         MB := 8;
@@ -386,6 +399,31 @@ begin
     Threads := DefaultThreads;
   if Threads = 0 then
     Threads := CpuCount;
+
+  { -b auto: one block per worker, never larger than the preset's block and
+    never smaller than 1 MiB. A 16 MiB input on eight threads goes from two
+    8 MiB blocks (two workers busy) to eight 2 MiB blocks (all of them). }
+  if AutoBlock and (Cmd = 'c') then
+  begin
+    try
+      with TFileStream.Create(InPath, fmOpenRead or fmShareDenyWrite) do
+      try
+        Target := Size div Threads;
+      finally
+        Free;
+      end;
+      if Target > 0 then
+      begin
+        Log := 20;
+        while (Log < BlockLog) and ((Int64(1) shl Log) < Target) do
+          Inc(Log);
+        BlockLog := Log;
+      end;
+    except
+      { Unreadable input: the preset block size stands and the error surfaces
+        when the file is opened for real. }
+    end;
+  end;
 
   case Cmd of
     'c':

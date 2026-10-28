@@ -9,6 +9,10 @@
   keeps its guard pages across blocks instead of mapping them per block
   (+2 %). End to end on the 85 MiB corpus: 16.4 -> 18.0 MB/s compress,
   30.0 -> 31.5 MB/s decode, with the compressed bytes unchanged.
+- `-b auto` sizes the blocks from the input length and the thread count
+  (`min(preset, input / threads)`, 1 MiB floor) so every worker has one: on a
+  16 MiB input at `-T 8` it is 2.8x faster to compress and 1.8x faster to
+  decompress for 1.1 points of ratio. Opt-in; larger inputs are unaffected.
 - `scripts/build.sh --profile` builds with `-O3 -g` for `perf` and callgrind.
 - [`docs/V5-STUDY.md`](docs/V5-STUDY.md): the profiling data behind the above,
   the optimisations that measured worse and were reverted, and what a v5 could

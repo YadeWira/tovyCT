@@ -62,6 +62,12 @@ for p in compact max; do
   cmp /tmp/tvct-sample.txt /tmp/tvct-sample-$p.out
 done
 
+# -b auto sizes the blocks from the input and the threads; the stream must
+# still round-trip and must not be larger than the fixed block size.
+./$BUILD/tvct c /tmp/tvct-sample.txt /tmp/tvct-auto.tvct -b auto -T 4
+./$BUILD/tvct d /tmp/tvct-auto.tvct /tmp/tvct-auto.out -T 4
+cmp /tmp/tvct-sample.txt /tmp/tvct-auto.out
+
 # Text transform. The source sample never takes it, so a generated prose
 # sample does: the stream must contain text blocks, round-trip with several
 # threads, and survive payload mutations along the text path.

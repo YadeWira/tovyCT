@@ -100,7 +100,7 @@ advance together — instruction-level parallelism inside one thread, which is
 where the current speedup ceiling is. The ILP part is unproven and would be the
 first thing to prototype: a two-way interleaved decode on a single core.
 
-### Block size that follows the input
+### Block size that follows the input (implemented as `-b auto`)
 
 The 85 MiB corpus does not care, but a 16 MiB file at `-T 8` only has two
 blocks:
@@ -112,10 +112,21 @@ blocks:
 | 2 MiB | 8 | 20.82 % | 30.1 MB/s | 75.9 MB/s |
 | 1 MiB | 16 | 21.78 % | 29.9 MB/s | 75.6 MB/s |
 
-Doubling decode throughput costs 0.5 points at 4 MiB. Picking the block size
-from the input length and the thread count (`min(8 MiB, input / threads)`, say)
-needs **no format change**: it is a preset heuristic, and the block size already
-travels in the header. That is the cheapest real speedup left for medium files.
+Doubling throughput costs 0.5 points at 4 MiB. That is now the `-b auto` flag:
+it sizes the block as `min(preset, input / threads)` with a 1 MiB floor, so
+every worker gets a block. It needs **no format change** — the block size
+already travels in the header — and it is opt-in because it trades ratio for
+speed.
+
+Measured on a 16 MiB input at `-T 8`:
+
+| | ratio | compress | decompress |
+|---|---|---|---|
+| default (8 MiB blocks, 2 blocks) | 19.72 % | 27.2 MB/s | 38.7-51 MB/s |
+| `-b auto` (2 MiB blocks, 8 blocks) | 20.82 % | 75.6 MB/s | 72.6-75.2 MB/s |
+
+On the 85 MiB corpus at `-T 8` the cap keeps 8 MiB blocks, so the output is
+byte-identical and the speed is unchanged.
 
 ### 32 MiB blocks and the 24-bit packing
 
@@ -135,7 +146,7 @@ than QLFC is the one thing this project has not found.
 
 1. Prototype two-way interleaved QLFC decode and measure the single-thread gain;
    if it is under 20 %, segmentation only pays for the thread case.
-2. Try the block-size heuristic in the CLI (no format change) and measure the
-   whole preset table again.
+2. Measure the whole preset table with `-b auto` and decide whether the speed
+   preset should default to it.
 3. Only then decide whether v5 needs new syntax at all, or whether v4 keeps
    gaining speed without moving a byte.

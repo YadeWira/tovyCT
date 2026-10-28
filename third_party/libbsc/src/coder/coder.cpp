@@ -338,8 +338,26 @@ int bsc_coder_compress(const unsigned char * input, unsigned char * output, int 
 }
 
 
+#ifdef TVCT_QLFC_AVX
+/* tovyCT: the same QLFC decoder compiled for AVX and linked under these names
+   (see scripts/build.sh). It takes the same bounds as the base version, so a
+   fault on a hostile stream is still a decode error; only the instruction mix
+   differs, and the decoded bytes are identical. */
+extern "C" int tvct_avx_bsc_qlfc_static_decode_block  (const unsigned char * input, int inputSize, unsigned char * output, int outputSize);
+extern "C" int tvct_avx_bsc_qlfc_adaptive_decode_block(const unsigned char * input, int inputSize, unsigned char * output, int outputSize);
+extern "C" int tvct_avx_bsc_qlfc_fast_decode_block    (const unsigned char * input, int inputSize, unsigned char * output, int outputSize);
+#endif
+
 int bsc_coder_decode_block(const unsigned char * input, int inputSize, unsigned char * output, int outputSize, int coder)
 {
+#ifdef TVCT_QLFC_AVX
+    if (bsc_get_cpu_features() >= LIBBSC_CPU_FEATURE_AVX)
+    {
+        if (coder == LIBBSC_CODER_QLFC_STATIC)   return tvct_avx_bsc_qlfc_static_decode_block  (input, inputSize, output, outputSize);
+        if (coder == LIBBSC_CODER_QLFC_ADAPTIVE) return tvct_avx_bsc_qlfc_adaptive_decode_block(input, inputSize, output, outputSize);
+        if (coder == LIBBSC_CODER_QLFC_FAST)     return tvct_avx_bsc_qlfc_fast_decode_block    (input, inputSize, output, outputSize);
+    }
+#endif
     if (coder == LIBBSC_CODER_QLFC_STATIC)   return bsc_qlfc_static_decode_block  (input, inputSize, output, outputSize);
     if (coder == LIBBSC_CODER_QLFC_ADAPTIVE) return bsc_qlfc_adaptive_decode_block(input, inputSize, output, outputSize);
     if (coder == LIBBSC_CODER_QLFC_FAST)     return bsc_qlfc_fast_decode_block    (input, inputSize, output, outputSize);

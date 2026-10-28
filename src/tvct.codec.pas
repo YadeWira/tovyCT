@@ -113,6 +113,14 @@ type
     Index: LongWord;        { position in the stream; seeds the block CRC }
     Crc: LongWord;
     Ok: Boolean;
+    { Decode scratch. Kept across the blocks a worker handles: a guard-page
+      buffer is a fresh mapping, and mapping one per block costs a page fault
+      and a kernel zero-fill for every block. }
+    Pay: PByte;             PayCap: SizeInt;
+    BwtScratch: PByte;      BwtCap: SizeInt;
+    TextScratch: PByte;     TextCap: SizeInt;
+    DstScratch: PByte;      DstCap: SizeInt;
+    SampleScratch: PInt32;  SampleCap: SizeInt;
   end;
   PBlockJob = ^TBlockJob;
 
@@ -463,6 +471,33 @@ begin
   end;
 end;
 
+{ Grows a guarded scratch buffer when the block needs more room than the last
+  one. The capacity is the size the buffer was mapped with. }
+function NeedGuard(var P: Pointer; var Cap: SizeInt; Need: SizeInt): Boolean;
+begin
+  if Cap >= Need then
+    Exit(P <> nil);
+  if P <> nil then
+    GuardFree(P, Cap);
+  P := GuardAlloc(Need);
+  Cap := Need;
+  Result := P <> nil;
+end;
+
+procedure FreeScratch(var Job: TBlockJob);
+begin
+  if Job.Pay <> nil then GuardFree(Job.Pay, Job.PayCap);
+  if Job.BwtScratch <> nil then GuardFree(Job.BwtScratch, Job.BwtCap);
+  if Job.TextScratch <> nil then GuardFree(Job.TextScratch, Job.TextCap);
+  if Job.DstScratch <> nil then GuardFree(Job.DstScratch, Job.DstCap);
+  if Job.SampleScratch <> nil then GuardFree(Job.SampleScratch, Job.SampleCap);
+  Job.Pay := nil; Job.PayCap := 0;
+  Job.BwtScratch := nil; Job.BwtCap := 0;
+  Job.TextScratch := nil; Job.TextCap := 0;
+  Job.DstScratch := nil; Job.DstCap := 0;
+  Job.SampleScratch := nil; Job.SampleCap := 0;
+end;
+
 { Decodes the body in Job.Blk into Job.Data (Job.N bytes). Everything that
   indexes a buffer is checked here first: this is where a corrupt stream that
   got past the body CRC ends up. }
@@ -543,67 +578,63 @@ begin
   if Job.BlkLen - Pos <= NSamples * 4 then   { the payload needs a byte too }
     Exit;
 
-  Pay := nil;
   Samples := nil;
   BwtBuf := nil;
   TextBuf := nil;
   Dst := nil;
-  try
-    if NSamples > 0 then
-    begin
-      Samples := GuardAlloc(NSamples * SizeOf(Int32));
-      if Samples = nil then
-        Exit;
-      { The rows are not 4-byte aligned inside the body. }
-      Move(Job.Blk[Pos], Samples^, NSamples * 4);
-      Inc(Pos, NSamples * 4);
-      for k := 0 to NSamples - 1 do
-        if (Samples[k] < 0) or (Samples[k] > T) then
-          Exit;
-    end;
-    { The payload is copied so that reads past its end fault too. }
-    PayLen := Job.BlkLen - Pos;
-    Pay := GuardAlloc(PayLen);
-    if Pay = nil then
-      Exit;
-    Move(Job.Blk[Pos], Pay^, PayLen);
-    BwtBuf := GuardAlloc(T + 1);
-    Dst := GuardAlloc(Job.N);
-    if (BwtBuf = nil) or (Dst = nil) then
-      Exit;
-    if IsText then
-    begin
-      TextBuf := GuardAlloc(T);
-      if TextBuf = nil then
-        Exit;
-    end;
 
-    Ctx.Pay := Pay;
-    Ctx.PayLen := PayLen;
-    Ctx.Bwt := BwtBuf;
-    Ctx.T := T;
-    Ctx.Primary := Primary;
-    Ctx.Samples := Samples;
-    Ctx.NSamples := NSamples;
-    Ctx.Text := TextBuf;
-    Ctx.Dst := Dst;
-    Ctx.N := Job.N;
-    Ctx.Coder := Job.Method and 3;
-    Ctx.R := -1;
-    Ctx.Ok := False;
-    if GuardRun(@GuardDecodeStages, @Ctx) <> 0 then
-      Exit;                                  { the stream stepped on a guard }
-    if not Ctx.Ok then
+  if NSamples > 0 then
+  begin
+    if not NeedGuard(Pointer(Job.SampleScratch), Job.SampleCap,
+                     NSamples * SizeOf(Int32)) then
       Exit;
-    Move(Dst^, Job.Data^, Job.N);
-    Result := True;
-  finally
-    if TextBuf <> nil then GuardFree(TextBuf, T);
-    if Dst <> nil then GuardFree(Dst, Job.N);
-    if BwtBuf <> nil then GuardFree(BwtBuf, T + 1);
-    if Samples <> nil then GuardFree(Samples, NSamples * SizeOf(Int32));
-    if Pay <> nil then GuardFree(Pay, PayLen);
+    Samples := Job.SampleScratch;
+    { The rows are not 4-byte aligned inside the body. }
+    Move(Job.Blk[Pos], Samples^, NSamples * 4);
+    Inc(Pos, NSamples * 4);
+    for k := 0 to NSamples - 1 do
+      if (Samples[k] < 0) or (Samples[k] > T) then
+        Exit;
   end;
+
+  { The payload is copied so that reads past its end fault too. }
+  PayLen := Job.BlkLen - Pos;
+  if not NeedGuard(Pointer(Job.Pay), Job.PayCap, PayLen) then
+    Exit;
+  Pay := Job.Pay;
+  Move(Job.Blk[Pos], Pay^, PayLen);
+  if not NeedGuard(Pointer(Job.BwtScratch), Job.BwtCap, T + 1) then
+    Exit;
+  BwtBuf := Job.BwtScratch;
+  if not NeedGuard(Pointer(Job.DstScratch), Job.DstCap, Job.N) then
+    Exit;
+  Dst := Job.DstScratch;
+  if IsText then
+  begin
+    if not NeedGuard(Pointer(Job.TextScratch), Job.TextCap, T) then
+      Exit;
+    TextBuf := Job.TextScratch;
+  end;
+
+  Ctx.Pay := Pay;
+  Ctx.PayLen := PayLen;
+  Ctx.Bwt := BwtBuf;
+  Ctx.T := T;
+  Ctx.Primary := Primary;
+  Ctx.Samples := Samples;
+  Ctx.NSamples := NSamples;
+  Ctx.Text := TextBuf;
+  Ctx.Dst := Dst;
+  Ctx.N := Job.N;
+  Ctx.Coder := Job.Method and 3;
+  Ctx.R := -1;
+  Ctx.Ok := False;
+  if GuardRun(@GuardDecodeStages, @Ctx) <> 0 then
+    Exit;                                  { the stream stepped on a guard }
+  if not Ctx.Ok then
+    Exit;
+  Move(Dst^, Job.Data^, Job.N);
+  Result := True;
 end;
 
 constructor TBlockWorker.Create(AJob: PBlockJob; ACompress: Boolean);
@@ -772,6 +803,7 @@ begin
   finally
     for i := 0 to Threads - 1 do
     begin
+      FreeScratch(Jobs[i]);
       FreeMem(Jobs[i].Data);
       FreeMem(Jobs[i].Blk);
     end;
@@ -938,6 +970,7 @@ begin
   finally
     for i := 0 to Threads - 1 do
     begin
+      FreeScratch(Jobs[i]);
       FreeMem(Jobs[i].Data);
       FreeMem(Jobs[i].Blk);
     end;

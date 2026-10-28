@@ -176,13 +176,42 @@ $AR rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o" "$OUT/lib/tvct_text.o
 LIBS="$LIBS -Fl$OUT/lib"
 
 # libbsc coder (C++), the entropy backend.
+#
+# QLFC has per-ISA decoders. The portable one is always built; on x86 an AVX
+# copy of the same source is built too, with its symbols renamed so both can be
+# linked, and the coder picks it at run time when the CPU has AVX. Only the
+# instruction mix changes: the decoded bytes and the stream are identical.
 BSC="third_party/libbsc/src"
-$CXX $CFLAGS -c "$BSC/coder/coder.cpp" -o "$OUT/bsc/coder.o"
+# nm and objcopy must match the compiler's target (the cross builds produce
+# COFF objects the host tools do not understand).
+tool_for() {
+  case "$CC" in
+    *-gcc) echo "${CC%-gcc}-$1" ;;
+    *) echo "$1" ;;
+  esac
+}
+OBJCOPY=${OBJCOPY:-$(tool_for objcopy)}
+NM=${NM:-$(tool_for nm)}
 $CXX $CFLAGS -c "$BSC/coder/qlfc/qlfc.cpp" -o "$OUT/bsc/qlfc.o"
+case "$($CC -dumpmachine 2>/dev/null)" in
+  x86_64*|i[3-6]86*)
+    $CXX $CFLAGS -mavx -c "$BSC/coder/qlfc/qlfc.cpp" -o "$OUT/bsc/qlfc_avx.o"
+    "$NM" -g --defined-only "$OUT/bsc/qlfc_avx.o" | awk '{print $3}' \
+      | sed 's/.*/& tvct_avx_&/' > "$OUT/bsc/qlfc_avx.syms"
+    "$OBJCOPY" --redefine-syms="$OUT/bsc/qlfc_avx.syms" "$OUT/bsc/qlfc_avx.o"
+    QLFC_OBJS="$OUT/bsc/qlfc_avx.o"
+    QLFC_DEF="-DTVCT_QLFC_AVX"
+    ;;
+  *)
+    QLFC_OBJS=""
+    QLFC_DEF=""
+    ;;
+esac
+$CXX $CFLAGS $QLFC_DEF -c "$BSC/coder/coder.cpp" -o "$OUT/bsc/coder.o"
 $CXX $CFLAGS -c "$BSC/coder/qlfc/qlfc_model.cpp" -o "$OUT/bsc/qlfc_model.o"
 $CXX $CFLAGS -c "$BSC/platform/platform.cpp" -o "$OUT/bsc/platform.o"
 $CXX $CFLAGS -c "$BSC/adler32/adler32.cpp" -o "$OUT/bsc/adler32.o"
-$AR rcs "$OUT/bsc/libbsc.a" "$OUT/bsc/coder.o" "$OUT/bsc/qlfc.o" \
+$AR rcs "$OUT/bsc/libbsc.a" "$OUT/bsc/coder.o" "$OUT/bsc/qlfc.o" $QLFC_OBJS \
     "$OUT/bsc/qlfc_model.o" "$OUT/bsc/platform.o" "$OUT/bsc/adler32.o"
 LIBS="$LIBS -Fl$OUT/bsc"
 

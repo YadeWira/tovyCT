@@ -10,6 +10,7 @@
 #   win-native    Windows x86-64 on a Windows host    build/win-native/
 #   win-native32  Windows i386 on a Windows host      build/win-native32/
 #   linux-arm64   Linux AArch64                      build/linux-arm64/
+#   linux-x86     Linux i386                         build/linux-x86/
 #
 # macOS AArch64 has no target: it is the host target, built on macOS (CI).
 #
@@ -65,6 +66,11 @@ case "$TARGET" in
     CC=aarch64-linux-gnu-gcc; CXX=aarch64-linux-gnu-g++; AR=aarch64-linux-gnu-ar
     FPC=${FPC_ARM64:-fpc-aarch64}
     CFLAGS="-O3 -mcpu=cortex-a53"; EXE=""; SO="libtvct.so"; OUT=build/linux-arm64
+    ;;
+  linux-x86)
+    CC=${CC:-gcc}; CXX=${CXX:-g++}; AR=${AR:-ar}
+    FPC=${FPC_I386:-fpc}
+    CFLAGS="-O3 -m32"; EXE=""; SO="libtvct.so"; OUT=build/linux-x86
     ;;
   win-native32)
     CC=${CC:-i686-w64-mingw32-gcc}; CXX=${CXX:-i686-w64-mingw32-g++}
@@ -124,6 +130,14 @@ done
 # The compiled C++ subset uses only C allocation and memcpy, so it needs no
 # libstdc++; the cross build passes the mingw library directories only because
 # they are part of its toolchain.
+if [ "$TARGET" = linux-x86 ]; then
+  for lib in libstdc++.a libgcc.a; do
+    path=$(g++ -m32 -print-file-name=$lib)
+    if [ -f "$path" ]; then
+      LIBS="$LIBS -Fl$(dirname "$path")"
+    fi
+  done
+fi
 mkdir -p "$OUT/tests" "$OUT/lib" "$OUT/bsc" "$OUT/libsais" "$OUT/units"
 
 # Native Windows links need the mingw import libraries (kernel32, advapi32 and
@@ -184,13 +198,15 @@ $FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fisrc -Futhird_party/pjabl
     -o"$OUT/$SO" src/tvct.api.lpr
 cp include/tvct.h "$OUT/tvct.h"
 
-if [ "$TARGET" = host ] && command -v cc >/dev/null 2>&1; then
+if { [ "$TARGET" = host ] || [ "$TARGET" = linux-x86 ]; } && command -v cc >/dev/null 2>&1; then
+  TFLAGS="-O2"
+  [ "$TARGET" = linux-x86 ] && TFLAGS="-O2 -m32"
   for t in tests/test_api.c tests/test_truncate.c tests/test_hostile.c \
            tests/test_payload.c; do
-    cc -O2 -I"$OUT" "$t" -L"$OUT" -ltvct -Wl,-rpath,"$(pwd)/$OUT" \
+    $CC $TFLAGS -I"$OUT" "$t" -L"$OUT" -ltvct -Wl,-rpath,"$(pwd)/$OUT" \
        -o "$OUT/$(basename "$t" .c)"
   done
-  cc -O2 tests/test_text.c src/c/tvct_text.c -o "$OUT/test_text"
+  $CC $TFLAGS tests/test_text.c src/c/tvct_text.c -o "$OUT/test_text"
 fi
 
 echo "built in $OUT"

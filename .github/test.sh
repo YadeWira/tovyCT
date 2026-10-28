@@ -2,49 +2,50 @@
 # Build-and-test helper used by CI; also runnable locally after scripts/build.sh.
 set -e
 cd "$(dirname "$0")/.."
+BUILD=${TVCT_BUILD:-build}
 
 # Deterministic sample: every file under src/, sorted by byte order.
 find src -type f -print | LC_ALL=C sort | xargs cat > /tmp/tvct-sample.txt
 
-./build/tests/test_sais /tmp/tvct-sample.txt
-./build/tests/test_bwt /tmp/tvct-sample.txt
-./build/tests/test_codec /tmp/tvct-sample.txt
-if [ -x build/tests/test_blake3 ]; then
-  ./build/tests/test_blake3 third_party/pjablake3/tests/kat.txt
+./$BUILD/tests/test_sais /tmp/tvct-sample.txt
+./$BUILD/tests/test_bwt /tmp/tvct-sample.txt
+./$BUILD/tests/test_codec /tmp/tvct-sample.txt
+if [ -x "$BUILD/tests/test_blake3" ]; then
+  ./$BUILD/tests/test_blake3 third_party/pjablake3/tests/kat.txt
 fi
 
-if [ -x build/test_api ]; then
+if [ -x "$BUILD/test_api" ]; then
   if [ "$(uname -s)" = Darwin ]; then
-    DYLD_LIBRARY_PATH=build ./build/test_api /tmp/tvct-sample.txt
+    DYLD_LIBRARY_PATH=$BUILD ./$BUILD/test_api /tmp/tvct-sample.txt
   else
-    ./build/test_api /tmp/tvct-sample.txt
+    ./$BUILD/test_api /tmp/tvct-sample.txt
   fi
 fi
 
-if [ -x build/test_text ]; then
-  ./build/test_text /tmp/tvct-sample.txt
-  ./build/test_text -b 4096 /tmp/tvct-sample.txt
+if [ -x "$BUILD/test_text" ]; then
+  ./$BUILD/test_text /tmp/tvct-sample.txt
+  ./$BUILD/test_text -b 4096 /tmp/tvct-sample.txt
 fi
 
-if [ -x build/test_hostile ]; then
-  ./build/test_hostile
+if [ -x "$BUILD/test_hostile" ]; then
+  ./$BUILD/test_hostile
 fi
 
-if [ -x build/test_truncate ]; then
+if [ -x "$BUILD/test_truncate" ]; then
   head -c 65536 /tmp/tvct-sample.txt > /tmp/tvct-trunc.txt
-  ./build/test_truncate /tmp/tvct-trunc.txt
+  ./$BUILD/test_truncate /tmp/tvct-trunc.txt
 fi
 
-./build/tvct c /tmp/tvct-sample.txt /tmp/tvct-sample.tvct -b 1 -T 1
-if [ -x build/test_payload ]; then
-  ./build/test_payload /tmp/tvct-sample.tvct /tmp/tvct-sample.txt
+./$BUILD/tvct c /tmp/tvct-sample.txt /tmp/tvct-sample.tvct -b 1 -T 1
+if [ -x "$BUILD/test_payload" ]; then
+  ./$BUILD/test_payload /tmp/tvct-sample.tvct /tmp/tvct-sample.txt
 fi
 
 # Presets: compact and max must be the same streams as the explicit flags.
 for p in compact max; do
-  ./build/tvct c /tmp/tvct-sample.txt /tmp/tvct-sample-$p.tvct -l $p -T 1
-  ./build/tvct t /tmp/tvct-sample-$p.tvct
-  ./build/tvct d /tmp/tvct-sample-$p.tvct /tmp/tvct-sample-$p.out -T 1
+  ./$BUILD/tvct c /tmp/tvct-sample.txt /tmp/tvct-sample-$p.tvct -l $p -T 1
+  ./$BUILD/tvct t /tmp/tvct-sample-$p.tvct
+  ./$BUILD/tvct d /tmp/tvct-sample-$p.tvct /tmp/tvct-sample-$p.out -T 1
   cmp /tmp/tvct-sample.txt /tmp/tvct-sample-$p.out
 done
 
@@ -52,25 +53,25 @@ done
 # sample does: the stream must contain text blocks, round-trip with several
 # threads, and survive payload mutations along the text path.
 python3 scripts/gen_prose.py 2500000 > /tmp/tvct-prose.txt
-./build/test_text -b 1048576 /tmp/tvct-prose.txt
-./build/tvct c /tmp/tvct-prose.txt /tmp/tvct-prose.tvct -b 1 -T 3 | tee /tmp/tvct-prose.log
+./$BUILD/test_text -b 1048576 /tmp/tvct-prose.txt
+./$BUILD/tvct c /tmp/tvct-prose.txt /tmp/tvct-prose.tvct -b 1 -T 3 | tee /tmp/tvct-prose.log
 if grep -q ' 0 text)' /tmp/tvct-prose.log; then
   echo "FAIL: the prose sample produced no text blocks"
   exit 1
 fi
-./build/tvct d /tmp/tvct-prose.tvct /tmp/tvct-prose.out -T 1
+./$BUILD/tvct d /tmp/tvct-prose.tvct /tmp/tvct-prose.out -T 1
 cmp /tmp/tvct-prose.txt /tmp/tvct-prose.out
-if [ -x build/test_payload ]; then
-  ./build/test_payload /tmp/tvct-prose.tvct /tmp/tvct-prose.txt
+if [ -x "$BUILD/test_payload" ]; then
+  ./$BUILD/test_payload /tmp/tvct-prose.tvct /tmp/tvct-prose.txt
 fi
 # BLAKE3 digest: round trip, and the header reports it.
-./build/tvct c /tmp/tvct-prose.txt /tmp/tvct-prose-h.tvct -b 1 -H -T 2
-./build/tvct i /tmp/tvct-prose-h.tvct | grep -q BLAKE3
-./build/tvct d /tmp/tvct-prose-h.tvct /tmp/tvct-prose-h.out -T 3
+./$BUILD/tvct c /tmp/tvct-prose.txt /tmp/tvct-prose-h.tvct -b 1 -H -T 2
+./$BUILD/tvct i /tmp/tvct-prose-h.tvct | grep -q BLAKE3
+./$BUILD/tvct d /tmp/tvct-prose-h.tvct /tmp/tvct-prose-h.out -T 3
 cmp /tmp/tvct-prose.txt /tmp/tvct-prose-h.out
 for x in off best; do
-  ./build/tvct c /tmp/tvct-prose.txt /tmp/tvct-prose-x$x.tvct -b 1 -x $x -T 2
-  ./build/tvct d /tmp/tvct-prose-x$x.tvct /tmp/tvct-prose-x$x.out -T 3
+  ./$BUILD/tvct c /tmp/tvct-prose.txt /tmp/tvct-prose-x$x.tvct -b 1 -x $x -T 2
+  ./$BUILD/tvct d /tmp/tvct-prose-x$x.tvct /tmp/tvct-prose-x$x.out -T 3
   cmp /tmp/tvct-prose.txt /tmp/tvct-prose-x$x.out
 done
 
@@ -85,31 +86,31 @@ text = ("El r\u00e1pido zorro salt\u00f3 sobre el perro perezoso. "
         "\u4f60\u597d\u4e16\u754c\u3002\n")
 print(text * 700, end="")
 PY
-if [ -x build/test_text ]; then
-  ./build/test_text /tmp/tvct-utf8.txt
+if [ -x "$BUILD/test_text" ]; then
+  ./$BUILD/test_text /tmp/tvct-utf8.txt
 fi
-./build/tvct c /tmp/tvct-utf8.txt /tmp/tvct-utf8-auto.tvct -b 1 -T 1
-./build/tvct c /tmp/tvct-utf8.txt /tmp/tvct-utf8-off.tvct -b 1 -x off -T 1
+./$BUILD/tvct c /tmp/tvct-utf8.txt /tmp/tvct-utf8-auto.tvct -b 1 -T 1
+./$BUILD/tvct c /tmp/tvct-utf8.txt /tmp/tvct-utf8-off.tvct -b 1 -x off -T 1
 a=$(stat -c%s /tmp/tvct-utf8-auto.tvct 2>/dev/null || stat -f%z /tmp/tvct-utf8-auto.tvct)
 o=$(stat -c%s /tmp/tvct-utf8-off.tvct 2>/dev/null || stat -f%z /tmp/tvct-utf8-off.tvct)
 if [ "$a" -gt "$o" ]; then
   echo "FAIL: the text transform made the UTF-8 sample larger ($a > $o)" >&2
   exit 1
 fi
-./build/tvct d /tmp/tvct-utf8-auto.tvct /tmp/tvct-utf8.out -T 2
+./$BUILD/tvct d /tmp/tvct-utf8-auto.tvct /tmp/tvct-utf8.out -T 2
 cmp /tmp/tvct-utf8.txt /tmp/tvct-utf8.out
 
 # Adaptive coder and no sample rows: a different method in the block header and
 # a serial inverse BWT, both reachable from a hostile stream.
-./build/tvct c /tmp/tvct-sample.txt /tmp/tvct-sample-adapt.tvct -b 1 -a -s -T 1
-./build/tvct t /tmp/tvct-sample-adapt.tvct
-./build/tvct d /tmp/tvct-sample-adapt.tvct /tmp/tvct-sample-adapt.out -T 2
+./$BUILD/tvct c /tmp/tvct-sample.txt /tmp/tvct-sample-adapt.tvct -b 1 -a -s -T 1
+./$BUILD/tvct t /tmp/tvct-sample-adapt.tvct
+./$BUILD/tvct d /tmp/tvct-sample-adapt.tvct /tmp/tvct-sample-adapt.out -T 2
 cmp /tmp/tvct-sample.txt /tmp/tvct-sample-adapt.out
-if [ -x build/test_payload ]; then
-  ./build/test_payload /tmp/tvct-sample-adapt.tvct /tmp/tvct-sample.txt
+if [ -x "$BUILD/test_payload" ]; then
+  ./$BUILD/test_payload /tmp/tvct-sample-adapt.tvct /tmp/tvct-sample.txt
 fi
-./build/tvct t /tmp/tvct-sample.tvct
-./build/tvct d /tmp/tvct-sample.tvct /tmp/tvct-sample.out -T 2
+./$BUILD/tvct t /tmp/tvct-sample.tvct
+./$BUILD/tvct d /tmp/tvct-sample.tvct /tmp/tvct-sample.out -T 2
 cmp /tmp/tvct-sample.txt /tmp/tvct-sample.out
 
 # One line with both hashes: the source sample (no text transform) and the

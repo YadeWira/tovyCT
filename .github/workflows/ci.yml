@@ -75,10 +75,15 @@ jobs:
         shell: pwsh
         run: |
           "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
-          Get-ChildItem C:\tools\freepascal -Recurse -Filter fpc.exe |
-            ForEach-Object { Split-Path $_.FullName } |
-            Sort-Object -Descending -Unique |
-            Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+          $roots = @('C:\FPC', 'C:\Program Files\Free Pascal', 'C:\tools\freepascal') |
+            Where-Object { Test-Path $_ }
+          $all = @($roots | ForEach-Object { Get-ChildItem $_ -Recurse -Filter fpc.exe -ErrorAction SilentlyContinue })
+          Write-Host "fpc candidates: $($all.FullName -join '; ')"
+          $fpc = $all | Where-Object { $_.FullName -match 'x86_64' } | Select-Object -First 1
+          if (-not $fpc) { $fpc = $all | Select-Object -First 1 }
+          if (-not $fpc) { throw 'fpc.exe not found after the installer' }
+          Write-Host "using $($fpc.FullName)"
+          Split-Path $fpc.FullName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
       - name: FPC banner
         shell: bash
         run: |

@@ -176,11 +176,14 @@ On the 85 MB text corpus, one thread unless noted:
 | tovyCT `fast` | 17.35 % | 16.9 MB/s | 31.5 MB/s |
 | tovyCT `max`, 8 threads | 16.84 % | 37.3 MB/s | 30.7 MB/s |
 | tovyCT `max` | 16.84 % | 9.9 MB/s | 10.4 MB/s |
-| bsc 3.3.12 | 17.33 % | 17.5 MB/s | 29.5 MB/s |
+| libbsc 3.3.12 (reference CLI) | 17.33 % | 17.5 MB/s | 29.5 MB/s |
 | bzip3 | 16.90 % | 7 MB/s | 9 MB/s |
 | xz -6 | 20.19 % | 6 MB/s | ~80 MB/s |
 | bzip2 -9 | 20.78 % | 11 MB/s | 35 MB/s |
 | zstd -19 | 20.18 % | 4 MB/s | 1087 MB/s |
+
+The libbsc row is the CLI of the version tovyCT vendored until the 3.4.0
+upgrade; 3.4.0 writes the same bytes on this corpus, so the numbers still apply.
 
 Decoding runs in C kernels: the encoder stores the LF-chain row of every
 4096-byte output chunk (taken from the inverse suffix array, about 0.1 % of the

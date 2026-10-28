@@ -258,12 +258,15 @@ so the decoder walks eight independent chains instead of one serial one.
   indexing a 32-entry model (seen as a use-after-free when the index landed in a
   freed chunk), an `i + runSize` overflow that let a 2 GB write pass the check,
   and a zero output size in the block table, which disabled the coder's bound
-  because zero meant "no limit". Three undefined behaviours were fixed with
-  them: `__builtin_clz(0)` on a one-character alphabet, misaligned 16-bit loads,
-  and MTF-table entries a hostile rank could read before they were written.
-  Each access now has a bound that comes from the caller, and the decoder has a
-  bounded entry point for the block table. That is still an argument from measurement; a guard-page sandbox around
-  the entropy step would turn any future fault into -1 regardless.
+  because zero meant "no limit". The rank exponent loop is bounded too (it used
+  to follow one bits when `maxRank` was 0), and four undefined behaviours were
+  fixed: `__builtin_clz(0)` on a one-character alphabet, misaligned 16-bit
+  loads, MTF-table entries a hostile rank could read before they were written,
+  and signed overflow in the adaptive mixer on hostile streams. Each access now
+  has a bound that comes from the caller, and the decoder has a bounded entry
+  point for the block table. That is still an argument from measurement; a
+  guard-page sandbox around the entropy step would turn any future fault into -1
+  regardless.
 - **Fuzzing was initially misconfigured, and the numbers said so too late.** The
   first campaign reported 80M executions with the seed corpus of an older format
   and an uninstrumented shared library: coverage was 5 edges (the harness only)
@@ -277,16 +280,19 @@ so the decoder walks eight independent chains instead of one serial one.
   fuzzer, which cannot see inside the Pascal code. The entropy coder, where the
   bugs were, is covered. A sanitiser build of the Pascal side would close the
   gap.
-- **Small files.** A stream header plus one block header is 36 bytes, so a tiny
-  file grows slightly. The 64 KiB minimum block also means the encoder does not
-  build a suffix array for less than that. Acceptable for a text compressor, not
-  for an archive of many tiny files.
-- **BLAKE3 digest.** An optional 128-bit BLAKE3 digest of the uncompressed data
-  would give a stronger declared integrity check than CRC-32C, but it travels in
-  the file and therefore cannot stop a deliberate forgery; it is not implemented.
-- **Targets.** ARMv7 was dropped by decision, macOS x86-64 is not built, and
-  Windows binaries are cross-compiled here and validated in VMs rather than by
-  CI.
+- **Small files.** Since v4 the headers are varints: a 100-byte file becomes
+  115 bytes and an empty one 8. The 64 KiB minimum block remains, so an archive
+  of thousands of tiny files would still pay per file; tovyCT is for text, not
+  for that.
+- **BLAKE3 digest.** Implemented as `-H`: 16 bytes at the end, checked after
+  decoding, and the stream must end right there. It is a stronger declared
+  integrity check than CRC-32C, but it travels in the file and therefore cannot
+  stop a deliberate forgery; the per-block CRC remains the corruption check.
+- **Targets.** Linux x86-64 and AArch64 plus macOS AArch64 run in CI; Windows
+  x86 and x64 are cross-compiled here and validated in VMs, not in CI. macOS
+  x86-64 is not built and ARMv7 was dropped by decision.
+- **Format v4 is experimental.** It may still change; there are no tags or
+  releases yet and the API reports version 0.2.
 
 ## 5. Licence hygiene
 

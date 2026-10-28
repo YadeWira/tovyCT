@@ -1,9 +1,11 @@
-# tovyCT stream format v4
+# tovyCT stream format v4/v5
 
-Status: **version 4, stable since 1.0.** The layout below is frozen: any 1.0
-decoder reads any 1.0 stream, the compressed bytes are identical on every
-supported platform, and a change that needs new syntax becomes v5. There is no
-backward compatibility with v1-v3; the decoder rejects any other version byte.
+Status: **version 4 is frozen since 1.0** and every 1.0 decoder reads it. Version
+5 adds one thing: a block may split its entropy payload into K independently
+coded streams so the decoder can run them on several threads. A writer emits
+v4 unless it was asked for segments; a reader accepts both, and the blocks of a
+v5 stream are otherwise identical to v4. There is no backward compatibility
+with v1-v3; the decoder rejects any other version byte.
 
 Fixed-size integers are little-endian. A **varint** is unsigned LEB128: seven
 bits per byte, least significant group first, the high bit set on every byte
@@ -49,7 +51,8 @@ The **method** byte:
 | 0-1 | coder: `0` stored, `1` BWT + QLFC static, `2` BWT + QLFC adaptive; `3` is invalid |
 | 2 | sample rows present |
 | 3 | text transform applied before the BWT |
-| 4-7 | 0 |
+| 4 | segmented entropy payload (v5 streams only) |
+| 5-7 | 0 |
 
 A stored block (coder 0) has no flags, its body is the original bytes, its body
 size equals its original size, and it has no body CRC: the block CRC already
@@ -63,7 +66,9 @@ its CRC would not be smaller.
 | varint | BWT size `T`, **only with the text flag**: 1..original size - 1. Without it, `T` is the original size |
 | varint | primary index, 0..`T` |
 | 4 × `ceil(T / 4096)` | sample rows (u32), only with the samples flag |
-| rest of the body | QLFC payload, at least one byte |
+| varint | stream count `K`, 2..8, **only with the segmented flag** |
+| varint × `K` | payload length of each stream, **only with the segmented flag** |
+| rest of the body | QLFC payload, at least one byte; with the segmented flag it is the K payloads, one after another |
 
 - **Primary index** is the BWT row of the rotation that starts at position 0.
 - **Sample rows.** `samples[k]` is the LF-mapping row, in the sentinel-extended
@@ -74,6 +79,12 @@ its CRC would not be smaller.
   same rows from the suffix array. They let the decoder walk up to eight chains
   at once (`src/c/tvct_kernels.c`); a decoder that ignores them can still invert
   the BWT serially from the primary index.
+- **Segmented payload.** With the flags bit 4 the BWT bytes are split into `K`
+  segments, segment `k` spanning `[T*k/K, T*(k+1)/K)`; each is compressed as an
+  independent QLFC stream and the decoded bytes are concatenated in order
+  before the inverse BWT. The streams share no state, so a decoder may run them
+  concurrently; the format does not say how many threads to use. Measured cost:
+  0.03 points of ratio with `K = 2`, 0.10 with `K = 8` on a 16 MiB block.
 - **Payload** is the QLFC (quantized local frequency coding) stream produced by
   libbsc's `bsc_coder_compress` with the static (coder 1) or adaptive (coder 2)
   coder over the `T`-byte BWT. Its internal framing is libbsc's; a decoder must

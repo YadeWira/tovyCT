@@ -83,6 +83,17 @@ cmp /tmp/tvct-prose.txt /tmp/tvct-prose.out
 if [ -x "$BUILD/test_payload" ]; then
   ./$BUILD/test_payload /tmp/tvct-prose.tvct /tmp/tvct-prose.txt
 fi
+# Segmented entropy stage (format v5): the body carries K independently coded
+# QLFC streams; the stream must say v5 and round-trip with and without threads.
+./$BUILD/tvct c /tmp/tvct-prose.txt /tmp/tvct-seg.tvct -b 1 -S 2 -T 2
+./$BUILD/tvct i /tmp/tvct-seg.tvct | grep -q 'v5' || {
+  echo "FAIL: a segmented stream is not marked v5" >&2
+  exit 1
+}
+./$BUILD/tvct d /tmp/tvct-seg.tvct /tmp/tvct-seg.out -T 4
+cmp /tmp/tvct-prose.txt /tmp/tvct-seg.out
+./$BUILD/tvct d /tmp/tvct-seg.tvct /tmp/tvct-seg2.out -T 1
+cmp /tmp/tvct-prose.txt /tmp/tvct-seg2.out
 # BLAKE3 digest: round trip, and the header reports it.
 ./$BUILD/tvct c /tmp/tvct-prose.txt /tmp/tvct-prose-h.tvct -b 1 -H -T 2
 ./$BUILD/tvct i /tmp/tvct-prose-h.tvct | grep -q BLAKE3

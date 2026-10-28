@@ -31,6 +31,7 @@ var
   Preset: string = '';
   BlockLogSet: Boolean = False;
   AutoBlock: Boolean = False;
+  Segments: Int32 = 1;
   Target: Int64;
   Log: Int32;
 
@@ -49,6 +50,9 @@ begin
   WriteLn('  -H:   end the stream with a BLAKE3-128 digest of the whole input');
   WriteLn('  -x:   text transform: auto (default: when it removes a tenth of the');
   WriteLn('        block), off, or best (compress both ways, keep the smaller)');
+  WriteLn('  -S K:       split every block into K independently coded streams (2..8)');
+  WriteLn('              so the decoder can run them on K threads; costs about');
+  WriteLn('              0.04 points of ratio with two streams');
   WriteLn('  -b auto:    size the blocks from the input and the threads, so that');
   WriteLn('              every worker gets one (trades ratio for speed on medium');
   WriteLn('              files; the preset sets the cap)');
@@ -206,23 +210,23 @@ end;
 procedure DoInfo(const InPath: string);
 var
   F: TFileStream;
-  BlockLog: Int32;
+  BlockLog, Version: Int32;
   Total: Int64;
   Known, Digest, Ok: Boolean;
 begin
   F := TFileStream.Create(InPath, fmOpenRead or fmShareDenyWrite);
   try
     try
-      Ok := ReadStreamHeader(F, BlockLog, Total, Known, Digest);
+      Ok := ReadStreamHeader(F, BlockLog, Total, Version, Known, Digest);
     except
       Ok := False;
     end;
     if not Ok then
     begin
-      WriteLn(StdErr, 'not a tovyCT v', CODEC_VERSION, ' stream');
+      WriteLn(StdErr, 'not a tovyCT stream');
       Exit;
     end;
-    WriteLn('format:    tovyCT v', CODEC_VERSION);
+    WriteLn('format:    tovyCT v', Version);
     WriteLn('block:     ', HumanBytes(Int64(1) shl BlockLog));
     if Known then
       WriteLn('original:  ', HumanBytes(Total))
@@ -348,6 +352,17 @@ begin
       end;
       BlockLogSet := False;
     end
+    else if ParamStr(i) = '-S' then
+    begin
+      Inc(i);
+      Segments := StrToIntDef(ParamStr(i), 1);
+      if Segments < 1 then
+        Segments := 1;
+      if Segments > MAX_SEGMENTS then
+        Segments := MAX_SEGMENTS;
+      if Segments = 1 then
+        Segments := 0;
+    end
     else if ParamStr(i) = '-b' then
     begin
       Inc(i);
@@ -436,6 +451,7 @@ begin
         Opts.UseSamples := not NoSamples;
         Opts.Text := TextMode;
         Opts.Digest := WithDigest;
+        Opts.Segments := Segments;
         Halt(Ord(not DoCompress(InPath, OutPath, Opts)));
       end;
     'd':

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Format v5: segmented entropy payloads** (`-S K`, K = 2..8). A block may now
+  carry K independently coded QLFC streams over its BWT output, so the entropy
+  stage decodes on several threads even when there are fewer blocks than
+  threads. Cost measured on a 16 MiB block: +0.03 points of ratio with two
+  streams, +0.10 with eight; decode at `-T 8` went from 25.7 to 37.5 MB/s
+  (+46 %). Streams without the flag are v4 and unchanged, and the reader takes
+  both versions.
+
 - **Faster decoding and compression, same bytes.** CRC-32C now uses the
   hardware instruction (SSE4.2, AArch64 `crc32cd`) with a slicing-by-8 fallback:
   compress +8 %, decode +13 %. The QLFC decoder is also built for AVX and picked

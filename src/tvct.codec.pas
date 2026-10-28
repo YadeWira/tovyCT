@@ -36,16 +36,24 @@ uses
 
 const
   CODEC_VERSION = 4;
+  { v5 adds the segmented entropy stage: the BWT output of a block is split
+    into K independently coded QLFC streams so the decoder can run them on
+    several threads. A v5 stream says so in the version byte; the reader takes
+    both. }
+  CODEC_VERSION_SEGMENTED = 5;
   DEFAULT_BLOCK_LOG = 23;
   { The coder values libbsc uses for the QLFC variants this format allows. }
   CODER_STATIC = BSC_CODER_STATIC;
   CODER_ADAPTIVE = BSC_CODER_ADAPTIVE;
   SAMPLE_RATE = 4096;
+  MAX_SEGMENTS = 8;         { streams per block }
+  MIN_SEGMENT_SHIFT = 18;   { 256 KiB: below this a segment does not pay }
 
   { Method byte: the coder in bits 0-1, flags above. }
   METHOD_STORED = 0;
   METHOD_FLAG_SAMPLES = 4;
   METHOD_FLAG_TEXT = 8;
+  METHOD_FLAG_SEGMENTED = 16;
 
   { Text transform: off, on when it makes the block smaller before the BWT, or
     on only when the compressed block comes out smaller (compresses twice). }
@@ -65,6 +73,7 @@ type
     UseSamples: Boolean;
     Text: Int32;
     Digest: Boolean;        { BLAKE3-128 of the whole input at the end }
+    Segments: Int32;        { independent QLFC streams per block, 1 = off }
   end;
 
   TCodecStats = record
@@ -85,6 +94,7 @@ function DecompressStream(Src, Dst: TStream; Threads: Int32;
 
 { The stream header alone. Total is valid only when Known. }
 function ReadStreamHeader(Src: TStream; out BlockLog: Int32; out Total: Int64;
+  out Version: Int32;
   out Known, Digest: Boolean): Boolean;
 
 { Total uncompressed size of a stream, from the headers without decoding.
@@ -110,6 +120,7 @@ type
     Blk: PByte;             { compress: the serialised block; decompress: the body }
     BlkLen, BlkCap: Int32;
     Method: Int32;
+    Threads: Int32;         { how many threads this block may use for itself }
     Index: LongWord;        { position in the stream; seeds the block CRC }
     Crc: LongWord;
     Ok: Boolean;
@@ -140,6 +151,7 @@ var
 function DefaultOptions: TCodecOptions;
 begin
   Result.BlockLog := DEFAULT_BLOCK_LOG;
+  Result.Segments := 1;
   Result.Coder := CODER_STATIC;
   Result.UseSamples := True;
   Result.Text := TEXT_AUTO;
@@ -247,13 +259,13 @@ begin
 end;
 
 procedure WriteStreamHeader(Dst: TStream; BlockLog: Int32; Total: Int64;
-  Known, Digest: Boolean);
+  Known, Digest: Boolean; Version: Int32);
 var
   Hdr: array[0..STREAM_HEADER_MIN + 9] of Byte;
   Len: Int32;
 begin
   Hdr[0] := Ord('T'); Hdr[1] := Ord('V'); Hdr[2] := Ord('C'); Hdr[3] := Ord('T');
-  Hdr[4] := CODEC_VERSION;
+  Hdr[4] := Byte(Version);
   Hdr[5] := Byte(BlockLog);
   Hdr[6] := Ord(Known) * STREAM_FLAG_TOTAL + Ord(Digest) * STREAM_FLAG_DIGEST;
   Len := STREAM_HEADER_MIN;
@@ -263,7 +275,7 @@ begin
 end;
 
 function ReadStreamHeader(Src: TStream; out BlockLog: Int32; out Total: Int64;
-  out Known, Digest: Boolean): Boolean;
+  out Version: Int32; out Known, Digest: Boolean): Boolean;
 var
   Hdr: array[0..STREAM_HEADER_MIN - 1] of Byte;
   V: QWord;
@@ -277,8 +289,10 @@ begin
     Exit;
   ReadExact(Src, @Hdr[0], STREAM_HEADER_MIN);
   if (Hdr[0] <> Ord('T')) or (Hdr[1] <> Ord('V')) or (Hdr[2] <> Ord('C')) or
-     (Hdr[3] <> Ord('T')) or (Hdr[4] <> CODEC_VERSION) then
+     (Hdr[3] <> Ord('T')) or
+     ((Hdr[4] <> CODEC_VERSION) and (Hdr[4] <> CODEC_VERSION_SEGMENTED)) then
     Exit;
+  Version := Hdr[4];
   BlockLog := Hdr[5];
   if (BlockLog < 16) or (BlockLog > 26) then   { 64 KiB .. 64 MiB }
     Exit;
@@ -324,12 +338,15 @@ end;
 { BWT + QLFC of In[0..T) into Body. Returns the body length, or -1. The body
   starts with the BWT size when the input is a text transform of the block. }
 function BuildBody(const In_: PByte; T: Int32; IsText: Boolean;
-  const Opts: TCodecOptions; Body: PByte; BodyCap: Int32): Int32;
+  const Opts: TCodecOptions; Body: PByte; BodyCap: Int32;
+  out Segmented: Boolean): Int32;
 var
   BwtBuf, Payload: PByte;
   SA, Samples: PInt32;
-  Primary, NSamples, R, Pos: Int32;
+  Primary, NSamples, R, Pos, K, Seg, Off, Len, Total: Int32;
+  SegLen: array[0..MAX_SEGMENTS - 1] of Int32;
 begin
+  Segmented := False;
   Result := -1;
   NSamples := 0;
   if Opts.UseSamples then
@@ -361,10 +378,40 @@ begin
     if Opts.UseSamples then
       BuildSamples(SA, T, Samples, NSamples);
 {$ENDIF}
-    R := bsc_coder_compress(BwtBuf, Payload, T, Opts.Coder, 0);
-    if R <= 0 then
-      Exit;
-    if BODY_PREFIX_MAX + NSamples * 4 + R > BodyCap then
+    { Segmented entropy stage: K independent QLFC streams over the BWT
+      output, so the decoder can run them on several threads. Costs 0.04
+      points of ratio with two streams and buys up to K times the entropy
+      throughput inside one block. }
+    K := Opts.Segments;
+    if K < 1 then K := 1;
+    if K > MAX_SEGMENTS then K := MAX_SEGMENTS;
+    if (K > 1) and (T < (1 shl (MIN_SEGMENT_SHIFT + 1))) then
+      K := 1;                       { two segments of at least 256 KiB }
+    Total := 0;
+    if K > 1 then
+    begin
+      for Seg := 0 to K - 1 do
+      begin
+        Off := Int32(Int64(T) * Seg div K);
+        Len := Int32(Int64(T) * (Seg + 1) div K) - Off;
+        R := bsc_coder_compress(BwtBuf + Off, Payload + Total, Len,
+                                Opts.Coder, 0);
+        if R <= 0 then
+          Exit;
+        SegLen[Seg] := R;
+        Inc(Total, R);
+      end;
+      Segmented := True;
+      R := Total;
+    end
+    else
+    begin
+      R := bsc_coder_compress(BwtBuf, Payload, T, Opts.Coder, 0);
+      if R <= 0 then
+        Exit;
+      SegLen[0] := R;
+    end;
+    if BODY_PREFIX_MAX + NSamples * 4 + MAX_SEGMENTS * 5 + R > BodyCap then
       Exit;
     Pos := 0;
     if IsText then
@@ -374,6 +421,12 @@ begin
     begin
       Move(Samples[0], Body[Pos], NSamples * 4);   { little-endian hosts only }
       Inc(Pos, NSamples * 4);
+    end;
+    if Segmented then
+    begin
+      Inc(Pos, PutVarint(@Body[Pos], QWord(K)));
+      for Seg := 0 to K - 1 do
+        Inc(Pos, PutVarint(@Body[Pos], QWord(SegLen[Seg])));
     end;
     Move(Payload[0], Body[Pos], R);
     Result := Pos + R;
@@ -391,7 +444,7 @@ procedure EncodeBlock(var Job: TBlockJob);
 var
   N, BodyLen, AltLen, T, HdrLen, Method, Limit: Int32;
   Body, Alt, TextBuf, Tmp, Payload: PByte;
-  TextUsed: Boolean;
+  TextUsed, Segmented, TextSegmented, AltSegmented: Boolean;
 begin
   N := Job.N;
   Job.Crc := Crc32c(Job.Index, Job.Data[0], N);
@@ -400,6 +453,9 @@ begin
   TextBuf := nil;
   try
     TextUsed := False;
+    Segmented := False;
+    TextSegmented := False;
+    AltSegmented := False;
     BodyLen := -1;
     if Job.Opts.Text <> TEXT_OFF then
     begin
@@ -414,8 +470,11 @@ begin
       T := tvct_text_encode(Job.Data, N, TextBuf, Limit);
       if T > 0 then
       begin
-        BodyLen := BuildBody(TextBuf, T, True, Job.Opts, Body, Job.BlkCap);
+        BodyLen := BuildBody(TextBuf, T, True, Job.Opts, Body, Job.BlkCap,
+                             TextSegmented);
         TextUsed := BodyLen > 0;
+        if TextUsed then
+          Segmented := TextSegmented;
       end;
     end;
     { Below 1 MiB compressing twice costs milliseconds, and the dictionary is
@@ -423,13 +482,17 @@ begin
     if (Job.Opts.Text <> TEXT_AUTO) or not TextUsed or (N < 1 shl 20) then
     begin
       GetMem(Alt, Job.BlkCap);
-      AltLen := BuildBody(Job.Data, N, False, Job.Opts, Alt, Job.BlkCap);
+      AltLen := BuildBody(Job.Data, N, False, Job.Opts, Alt, Job.BlkCap,
+                          AltSegmented);
       if (AltLen > 0) and ((BodyLen <= 0) or (AltLen <= BodyLen)) then
       begin
         Tmp := Body; Body := Alt; Alt := Tmp;
         BodyLen := AltLen;
+        Segmented := AltSegmented;
         TextUsed := False;
-      end;
+      end
+      else if BodyLen > 0 then
+        Segmented := TextSegmented;
     end;
 
     { Stored when compression does not pay for its own extra CRC. }
@@ -447,6 +510,8 @@ begin
         Method := Method or METHOD_FLAG_SAMPLES;
       if TextUsed then
         Method := Method or METHOD_FLAG_TEXT;
+      if Segmented then
+        Method := Method or METHOD_FLAG_SEGMENTED;
     end;
 
     HdrLen := PutVarint(@Job.Blk[0], QWord(N));
@@ -504,6 +569,24 @@ end;
 type
   { Everything the guarded stages need. Allocated outside GuardRun, so the
     buffers can be freed however the run ends. }
+  TSegDecode = record
+    Pay: PByte;
+    PayLen: Int32;
+    Dst: PByte;
+    DstLen: Int32;
+    Coder: Int32;
+    Ok: Boolean;
+  end;
+
+  TSegThread = class(TThread)
+  private
+    FCtx: ^TSegDecode;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(ACtx: Pointer);
+  end;
+
   TGuardDecode = record
     Pay: PByte;
     PayLen: Int32;
@@ -519,17 +602,22 @@ type
     Ok: Boolean;
   end;
 
-{ The two C stages inside the sandbox: a fault in either one comes back from
-  GuardRun as a failed block instead of a crash. }
-procedure GuardDecodeStages(Ctx: Pointer); cdecl;
+{ One entropy segment, decoded inside the sandbox. }
+procedure GuardEntropyOne(Ctx: Pointer); cdecl;
+var
+  C: ^TSegDecode;
+begin
+  C := Ctx;
+  C^.Ok := bsc_coder_decompress_bounded(C^.Pay, C^.PayLen, C^.Dst, C^.DstLen,
+                                         C^.Coder, 0) = C^.DstLen;
+end;
+
+{ The tail of a block: inverse BWT, then the inverse text transform. }
+procedure GuardTail(Ctx: Pointer); cdecl;
 var
   C: ^TGuardDecode;
 begin
   C := Ctx;
-  C^.R := bsc_coder_decompress_bounded(C^.Pay, C^.PayLen, C^.Bwt, C^.T,
-                                       C^.Coder, 0);
-  if C^.R <> C^.T then
-    Exit;
   if C^.Text <> nil then
   begin
     kernel_bwt_inverse(C^.Bwt, C^.T, C^.Primary, C^.Samples, C^.NSamples,
@@ -544,15 +632,48 @@ begin
   end;
 end;
 
+{ Single-stream block: entropy and tail in one guard region. }
+procedure GuardDecodeAll(Ctx: Pointer); cdecl;
+var
+  C: ^TGuardDecode;
+begin
+  C := Ctx;
+  C^.R := bsc_coder_decompress_bounded(C^.Pay, C^.PayLen, C^.Bwt, C^.T,
+                                       C^.Coder, 0);
+  if C^.R <> C^.T then
+    Exit;
+  GuardTail(Ctx);
+end;
+
+constructor TSegThread.Create(ACtx: Pointer);
+begin
+  FCtx := ACtx;
+  FreeOnTerminate := False;
+  inherited Create(False);
+end;
+
+procedure TSegThread.Execute;
+begin
+  if GuardRun(@GuardEntropyOne, FCtx) <> 0 then
+    FCtx^.Ok := False;
+end;
+
 { Decodes the body in Job.Blk into Job.Data (Job.N bytes). Everything that
   indexes a buffer is checked here first: this is where a corrupt stream that
   got past the body CRC ends up. The payload and every output buffer end at a
-  guard page, so the stages run inside one: a fault is a failed block. }
+  guard page, so the stages run inside one: a fault is a failed block.
+
+  A segmented block splits the BWT output into K independently coded streams;
+  they are decoded on K threads and the inverse BWT runs on the joined
+  result. }
 function DecodeBlock(var Job: TBlockJob): Boolean;
 var
-  Pos, T, Primary, NSamples, k, PayLen: Int32;
+  Pos, T, Primary, NSamples, i, PayLen, K, Total, Off, Len, SegOff: Int32;
   V: QWord;
   Ctx: TGuardDecode;
+  Seg: array[0..MAX_SEGMENTS - 1] of TSegDecode;
+  Th: array[0..MAX_SEGMENTS - 2] of TSegThread;
+  SegLen: array[0..MAX_SEGMENTS - 1] of Int32;
   Pay: PByte;
   Samples: PInt32;
   BwtBuf, TextBuf, Dst: PByte;
@@ -582,6 +703,7 @@ begin
   BwtBuf := nil;
   TextBuf := nil;
   Dst := nil;
+  K := 1;
 
   if NSamples > 0 then
   begin
@@ -592,9 +714,32 @@ begin
     { The rows are not 4-byte aligned inside the body. }
     Move(Job.Blk[Pos], Samples^, NSamples * 4);
     Inc(Pos, NSamples * 4);
-    for k := 0 to NSamples - 1 do
+    for i := 0 to NSamples - 1 do
       if (Samples[k] < 0) or (Samples[k] > T) then
         Exit;
+  end;
+
+  { Segmented blocks carry the stream count and their lengths before the
+    payload. Every length is checked against what is left of the body. }
+  if (Job.Method and METHOD_FLAG_SEGMENTED) <> 0 then
+  begin
+    if not GetVarint(Job.Blk, Job.BlkLen, Pos, 5, V) or (V < 2) or
+       (V > MAX_SEGMENTS) then
+      Exit;
+    K := Int32(V);
+    Total := 0;
+    for i := 0 to K - 1 do
+    begin
+      if not GetVarint(Job.Blk, Job.BlkLen, Pos, 5, V) or (V < 1) or
+         (V > QWord(Job.BlkLen)) then
+        Exit;
+      SegLen[i] := Int32(V);
+      Inc(Total, SegLen[i]);
+      if (Total < 0) or (Total > Job.BlkLen - Pos) then
+        Exit;
+    end;
+    if Total > Job.BlkLen - Pos then
+      Exit;
   end;
 
   { The payload is copied so that reads past its end fault too. }
@@ -629,10 +774,54 @@ begin
   Ctx.Coder := Job.Method and 3;
   Ctx.R := -1;
   Ctx.Ok := False;
-  if GuardRun(@GuardDecodeStages, @Ctx) <> 0 then
-    Exit;                                  { the stream stepped on a guard }
-  if not Ctx.Ok then
-    Exit;
+
+  if K = 1 then
+  begin
+    if GuardRun(@GuardDecodeAll, @Ctx) <> 0 then
+      Exit;                                { the stream stepped on a guard }
+    if not Ctx.Ok then
+      Exit;
+  end
+  else
+  begin
+    SegOff := 0;
+    for i := 0 to K - 1 do
+    begin
+      Off := Int32(Int64(T) * i div K);
+      Len := Int32(Int64(T) * (i + 1) div K) - Off;
+      Seg[i].Pay := Pay + SegOff;
+      Seg[i].PayLen := SegLen[i];
+      Seg[i].Dst := BwtBuf + Off;
+      Seg[i].DstLen := Len;
+      Seg[i].Coder := Job.Method and 3;
+      Seg[i].Ok := False;
+      Inc(SegOff, SegLen[i]);
+    end;
+    if (Job.Threads > 1) and (K <= Job.Threads) then
+    begin
+      for i := 0 to K - 2 do
+        Th[i] := TSegThread.Create(@Seg[i]);
+      if GuardRun(@GuardEntropyOne, @Seg[K - 1]) <> 0 then
+        Seg[K - 1].Ok := False;
+      for i := 0 to K - 2 do
+      begin
+        Th[i].WaitFor;
+        Th[i].Free;
+      end;
+    end
+    else
+      for i := 0 to K - 1 do
+        if GuardRun(@GuardEntropyOne, @Seg[i]) <> 0 then
+          Seg[i].Ok := False;
+    for i := 0 to K - 1 do
+      if not Seg[i].Ok then
+        Exit;
+    if GuardRun(@GuardTail, @Ctx) <> 0 then
+      Exit;
+    if not Ctx.Ok then
+      Exit;
+  end;
+
   Move(Dst^, Job.Data^, Job.N);
   Result := True;
 end;
@@ -744,7 +933,12 @@ begin
     Known := False;
   end;
   Start := Dst.Position;
-  WriteStreamHeader(Dst, Opts.BlockLog, Total, Known, Opts.Digest);
+  if Opts.Segments > 1 then
+    WriteStreamHeader(Dst, Opts.BlockLog, Total, Known, Opts.Digest,
+                      CODEC_VERSION_SEGMENTED)
+  else
+    WriteStreamHeader(Dst, Opts.BlockLog, Total, Known, Opts.Digest,
+                      CODEC_VERSION);
   if Opts.Digest then
     Hash.Init;
   Index := 0;
@@ -824,7 +1018,8 @@ begin
   Job.N := Int32(V);
   Job.Method := Src.ReadByte;
   Coder := Job.Method and 3;
-  if (Job.Method and not (3 or METHOD_FLAG_SAMPLES or METHOD_FLAG_TEXT)) <> 0 then
+  if (Job.Method and not (3 or METHOD_FLAG_SAMPLES or METHOD_FLAG_TEXT or
+                          METHOD_FLAG_SEGMENTED)) <> 0 then
     Exit;
   if (Coder = 3) or ((Coder = METHOD_STORED) and (Job.Method <> METHOD_STORED)) then
     Exit;
@@ -859,6 +1054,7 @@ var
   BlockLog, AllocSize, BodyCap, Count, i: Int32;
   Total, Decoded, Pending, MaxTotal, Start: Int64;
   Known, HasDigest, Ended: Boolean;
+  Version: Int32;
   Index: LongWord;
   Hash: TBlake3;
   Want, Got: THash16;
@@ -869,7 +1065,7 @@ begin
     Threads := 1;
   EnsureBsc;
   Start := Src.Position;
-  if not ReadStreamHeader(Src, BlockLog, Total, Known, HasDigest) then
+  if not ReadStreamHeader(Src, BlockLog, Total, Version, Known, HasDigest) then
     Exit;
   if HasDigest then
     Hash.Init;
@@ -932,6 +1128,15 @@ begin
       end;
       if Count = 0 then
         Break;
+      { A block may use as many threads as there are spare ones: if the batch
+        fills the pool, the segments decode one after another and the entropy
+        stage still gets its bytes. }
+      for i := 0 to Count - 1 do
+      begin
+        Jobs[i].Threads := Threads div Count;
+        if Jobs[i].Threads < 1 then
+          Jobs[i].Threads := 1;
+      end;
       RunJobs(Jobs, Count, False, Skip);
       for i := 0 to Count - 1 do
       begin
@@ -979,13 +1184,13 @@ end;
 
 function StreamDataSize(Src: TStream): Int64;
 var
-  BlockLog, Method: Int32;
+  BlockLog, Method, Version: Int32;
   Total: Int64;
   Known, HasDigest: Boolean;
   Orig, Body: QWord;
 begin
   Result := -1;
-  if not ReadStreamHeader(Src, BlockLog, Total, Known, HasDigest) then
+  if not ReadStreamHeader(Src, BlockLog, Total, Version, Known, HasDigest) then
     Exit;
   if Known then
     Exit(Total);

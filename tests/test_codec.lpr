@@ -4,7 +4,7 @@ program test_codec;
 
 {$mode objfpc}{$H+}
 {$POINTERMATH ON}
-{$R-}{$Q-}
+{$IFDEF TVCT_CHECKED}{$R+}{$Q+}{$ELSE}{$R-}{$Q-}{$ENDIF}
 
 uses
   Classes, SysUtils, tvct.codec;

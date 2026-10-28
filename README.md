@@ -70,6 +70,9 @@ Output defaults to `<input>.tvct` when compressing and the name without that
 suffix when decompressing. `-T 1` forces the sequential path; by default it uses
 one worker per CPU, capped at 8. The compressed bytes do not depend on `-T`.
 
+`scripts/build.sh --checked` compiles the Pascal side with range and overflow
+checks (and `-O1`); the CI suite runs once with them.
+
 `-l` picks a preset: `fast` (default; static, 8 MiB blocks, sample rows),
 `compact` (static, 16 MiB) or `max` (adaptive, no sample rows, 16 MiB, or 32 MiB
 when the input fits in one block). The individual flags below override it.

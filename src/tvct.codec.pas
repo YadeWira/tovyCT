@@ -26,7 +26,7 @@
 unit tvct.codec;
 
 {$mode objfpc}{$H+}
-{$R-}{$Q-}
+{$IFDEF TVCT_CHECKED}{$R+}{$Q+}{$ELSE}{$R-}{$Q-}{$ENDIF}
 
 interface
 

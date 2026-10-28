@@ -23,12 +23,14 @@ TARGET=host
 USE_LIBSAIS=0
 DEBUG=0
 PORTABLE=0
+CHECKS=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --target) TARGET="$2"; shift 2 ;;
     --libsais) USE_LIBSAIS=1; shift ;;
     --debug) DEBUG=1; shift ;;
+    --checked) CHECKS=1; shift ;;
     --portable) PORTABLE=1; shift ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
@@ -100,12 +102,20 @@ else
   FPCOPT="-O3"; MODE=""
 fi
 
+if [ "$CHECKS" = 1 ]; then
+  FPCOPT="-O1 -Cr -Co"; MODE="-g -gl"
+  CFLAGS="$CFLAGS -O1 -g"
+fi
+
 # libbsc reads the compressed stream through 16-bit loads; the explicit memcpy
 # path is well defined and does not depend on the architecture tolerating
 # misaligned accesses.
 CFLAGS="$CFLAGS -DLIBBSC_NO_UNALIGNED_ACCESS"
 
 DEFS=""
+if [ "$CHECKS" = 1 ]; then
+  DEFS="-dTVCT_CHECKED"
+fi
 LIBS=""
 for d in $WINLIB; do
   LIBS="$LIBS -Fl$d"

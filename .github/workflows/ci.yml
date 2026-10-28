@@ -139,6 +139,19 @@ jobs:
           name: hash-windows-x86
           path: hash.txt
 
+  checked:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fpc
+      - name: Build with range and overflow checks
+        run: ./scripts/build.sh --libsais --portable --checked
+      - name: Test
+        run: sh .github/test.sh
+
   fuzz:
     runs-on: ubuntu-latest
     steps:

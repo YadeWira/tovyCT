@@ -274,12 +274,13 @@ so the decoder walks eight independent chains instead of one serial one.
   coder with `-fsanitize=fuzzer-no-link`, regenerates the corpus each run, and
   keeps the inputs that found real bugs as regression seeds. When a fuzzer runs
   80M inputs in a minute, that is the signal to check what it is measuring.
-- **The Pascal container has no sanitizer coverage.** Its bounds are checked by
-  the deterministic tests (every truncation, appended bytes, bit flips,
-  fabricated headers, payload mutations with recomputed CRCs) and by the C API
-  fuzzer, which cannot see inside the Pascal code. The entropy coder, where the
-  bugs were, is covered. A sanitiser build of the Pascal side would close the
-  gap.
+- **The Pascal container has no AddressSanitizer coverage.** Its bounds are
+  checked by the deterministic tests (every truncation, appended bytes, bit
+  flips, fabricated headers, payload mutations with recomputed CRCs), and a
+  `--checked` build with range and overflow checks runs the whole suite in CI.
+  That catches Pascal-level indexes and arithmetic, not the C-style buffer
+  overruns ASan would; the entropy coder, where the bugs were, is covered by the
+  C sanitizer fuzzers. An ASan-capable Pascal toolchain would close the gap.
 - **Small files.** Since v4 the headers are varints: a 100-byte file becomes
   115 bytes and an empty one 8. The 64 KiB minimum block remains, so an archive
   of thousands of tiny files would still pay per file; tovyCT is for text, not

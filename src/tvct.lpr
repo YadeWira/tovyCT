@@ -12,7 +12,7 @@ program tvct;
 }
 
 {$mode objfpc}{$H+}
-{$R-}{$Q-}
+{$IFDEF TVCT_CHECKED}{$R+}{$Q+}{$ELSE}{$R-}{$Q-}{$ENDIF}
 
 uses
   {$IFDEF UNIX}cthreads,{$ENDIF}

@@ -106,7 +106,7 @@ end;
 
 function tvct_version: PChar; cdecl;
 begin
-  Result := 'tovyCT 0.2 (format v4)';
+  Result := 'tovyCT 0.2.0 (format v4)';
 end;
 
 function tvct_compress_bound(src_size: SizeInt): SizeInt; cdecl;

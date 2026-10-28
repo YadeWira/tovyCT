@@ -1,0 +1,89 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+# Builds the three platforms the hosted runners can build and attaches the
+# binaries to the tag. The Windows x86/x64 executables are cross-built and
+# validated in VMs, then uploaded by hand to the same release.
+
+jobs:
+  linux-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fpc
+      - name: Build
+        run: ./scripts/build.sh --libsais
+      - name: Package
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          mkdir -p pkg
+          cp build/tvct build/libtvct.so build/tvct.h README.md LICENSE CHANGELOG.md pkg/
+          tar -C pkg -czf "tovyct-${V}-linux-x86_64.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: tovyct-*.tar.gz
+
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fpc
+      - name: Build
+        run: ./scripts/build.sh --libsais
+      - name: Package
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          mkdir -p pkg
+          cp build/tvct build/libtvct.so build/tvct.h README.md LICENSE CHANGELOG.md pkg/
+          tar -C pkg -czf "tovyct-${V}-linux-aarch64.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-aarch64
+          path: tovyct-*.tar.gz
+
+  macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal
+        run: brew install fpc
+      - name: Build
+        run: ./scripts/build.sh --libsais
+      - name: Package
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          mkdir -p pkg
+          cp build/tvct build/libtvct.dylib build/tvct.h README.md LICENSE CHANGELOG.md pkg/
+          tar -C pkg -czf "tovyct-${V}-macos-aarch64.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-aarch64
+          path: tovyct-*.tar.gz
+
+  release:
+    needs: [linux-x64, linux-arm64, macos-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          prerelease: true
+          generate_release_notes: true

@@ -6,6 +6,7 @@ vectorised C kernels for the hot paths.
 | Component | Status |
 |---|---|
 | CI | [![CI][ciBadge]][ciLink] |
+| Latest release | [![Release][relBadge]][relLink] |
 | Format | v4, experimental |
 | CLI and C API | working |
 | Text transform and BLAKE3 digest | working |
@@ -268,3 +269,5 @@ pjablake3 (MIT).
 
 [ciBadge]: https://github.com/YadeWira/tovyCT/actions/workflows/ci.yml/badge.svg "Continuous Integration"
 [ciLink]: https://github.com/YadeWira/tovyCT/actions/workflows/ci.yml
+[relBadge]: https://img.shields.io/github/v/release/YadeWira/tovyCT "Latest release"
+[relLink]: https://github.com/YadeWira/tovyCT/releases/latest

@@ -186,7 +186,13 @@ BSC="third_party/libbsc/src"
 # COFF objects the host tools do not understand).
 tool_for() {
   case "$CC" in
-    *-gcc) echo "${CC%-gcc}-$1" ;;
+    *-gcc)
+      if command -v "${CC%-gcc}-$1" >/dev/null 2>&1; then
+        echo "${CC%-gcc}-$1"
+      else
+        echo "$1"          # MSYS2 ships unprefixed binutils
+      fi
+      ;;
     *) echo "$1" ;;
   esac
 }

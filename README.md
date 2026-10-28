@@ -15,7 +15,7 @@ vectorised C kernels for the hot paths.
 
 **Status: working, format still experimental.** Format v4, a small CLI, a C API,
 round-trip and hardening tests, coverage fuzzing, and CI on Linux x86-64, Linux
-AArch64, macOS AArch64, Windows x86-64 and Windows x86 (32-bit). The format is specified in [`docs/FORMAT.md`](docs/FORMAT.md) and may
+AArch64, Linux x86 (32-bit), macOS AArch64, Windows x86-64 and Windows x86. The format is specified in [`docs/FORMAT.md`](docs/FORMAT.md) and may
 still change; the measurements and the design that was dropped are in
 [`docs/DESIGN.md`](docs/DESIGN.md).
 
@@ -39,6 +39,7 @@ Supported targets:
 |---|---|---|
 | Linux | x86-64 | built and tested on the host |
 | Linux | AArch64 | built and tested in CI; output is byte-identical to x86-64 |
+| Linux | x86 (32-bit) | built and tested in CI; output is byte-identical to x86-64 |
 | Windows (7 and later) | x86-64 | built and tested in CI on a Windows runner; also validated in a Windows 10 VM |
 | Windows (7 and later) | x86 | built and tested in CI on a Windows runner; also validated in a Windows 7 VM |
 | macOS | AArch64 | built and tested in GitHub Actions |
@@ -50,9 +51,9 @@ also validated in a Windows 7 virtual machine.
 ## CI
 
 `.github/workflows/ci.yml` builds and tests Linux x86-64, Linux AArch64,
-macOS AArch64, Windows x86-64 and Windows x86, then compares the SHA-256 of a
-compressed sample across the five jobs: the compressed output is byte-identical
-on every architecture. The unit tests, the C API tests, the text transform test, the
+Linux x86, macOS AArch64, Windows x86-64 and Windows x86, then compares the
+SHA-256 of a compressed sample across the six jobs: the compressed output is
+byte-identical on every architecture. The unit tests, the C API tests, the text transform test, the
 BLAKE3 known-answer test and full stream round-trips run in each job; a
 generated prose sample makes sure the text transform is on the tested path.
 
@@ -169,6 +170,8 @@ Requirements: Free Pascal 3.2.2 (the current stable release) and a C compiler
 ```sh
 scripts/build.sh --libsais    # recommended: libsais for the suffix array
 scripts/build.sh --portable   # generic code generation instead of -march=native
+scripts/fpc-i386.sh /tmp/fpc-i386
+FPC_I386=/tmp/fpc-i386/fpc scripts/build.sh --libsais --target linux-x86
 sh .github/test.sh            # the CI test suite
 sh .github/fuzz.sh 120 8      # the fuzzers, 120 s each on 8 workers
 ```

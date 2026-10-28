@@ -149,8 +149,34 @@ jobs:
           name: windows-x86
           path: tovyct-*.zip
 
+  linux-x86:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the 32-bit toolchain
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib libc6:i386 libstdc++6:i386
+      - name: Install the 32-bit Free Pascal
+        run: scripts/fpc-i386.sh /tmp/fpc-i386
+      - name: Build
+        env:
+          FPC_I386: /tmp/fpc-i386/fpc
+        run: ./scripts/build.sh --libsais --target linux-x86
+      - name: Package
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          mkdir -p pkg
+          cp build/linux-x86/tvct build/linux-x86/libtvct.so build/linux-x86/tvct.h README.md LICENSE CHANGELOG.md pkg/
+          tar -C pkg -czf "tovyct-${V}-linux-i386.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-i386
+          path: tovyct-*.tar.gz
+
   release:
-    needs: [linux-x64, linux-arm64, macos-arm64, windows-x64, windows-x86]
+    needs: [linux-x64, linux-arm64, linux-x86, macos-arm64, windows-x64, windows-x86]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

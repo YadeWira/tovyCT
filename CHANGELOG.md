@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Linux x86 (i386)** target, CI and release package; the compressed bytes are
+  identical to the 64-bit build.
+- CI now builds and tests six targets (Linux x86-64/x86/AArch64, macOS AArch64,
+  Windows x86-64/x86) and compares the compressed hashes across all of them.
+- A `--checked` build with Pascal range and overflow checks runs the whole test
+  suite in CI.
+- UTF-8 text was measured (Latin/Cyrillic books gain 0.1 to 1.4 %, CJK skips the
+  transform) and is covered by a regression test.
+
+
 ## 0.2.0 — 2026-10-28
 
 First tagged release; the format is still experimental.

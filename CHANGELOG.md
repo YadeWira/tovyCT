@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.0 — 2026-10-28
+
+The format is frozen: any 1.0 build decodes any 1.0 stream, on any of the six
+targets, and the compressed bytes are identical across them.
+
+- **Guard-page sandbox on the decode path.** The compressed payload and every
+  output buffer end at a `PROT_NONE` page and the QLFC, inverse BWT and text
+  stages run inside `tvct_guard_run()`: a read or write past a buffer is a failed
+  block, not corruption. Per thread, 2-4 % of decode speed, no effect on the
+  encoded bytes. The CLI turns it on and takes `--no-guard`; the C API exposes
+  `tvct_set_guard()` and leaves the default to the host. Windows has no
+  implementation and says so. `tvct --guard-check` proves the mechanism and CI
+  runs it on every platform.
+- **Ratio closed against libbsc 3.4.0**: tovyCT is smaller than bsc's coder at
+  8 and 16 MB (17.35/17.10 % against 17.36/17.11 % without preprocessing) and
+  within 0.03-0.05 points of the full bsc CLI, which spends an LZP stage for it;
+  16.84 % against bsc's 16.90 % in the adaptive mode. The measurements are in
+  `docs/DESIGN.md`; the LZP stage stays out by decision.
+- **A UTF-8 dictionary extension was measured and rejected**: it made Russian
+  0.55 points larger and most Latin books slightly worse, because the BWT already
+  models those words. The ASCII-only transform that ships is the measured best.
+- Documentation marked stable: `docs/FORMAT.md` is the frozen v4 layout.
+
 ## 0.2.2 — 2026-10-28
 
 - `tvct --version` (and `-V`) prints the release version; the CLI and

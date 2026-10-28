@@ -3,6 +3,15 @@
 A fast text compressor with a good ratio, written in Free Pascal and C, with
 vectorised C kernels for the hot paths.
 
+| Component | Status |
+|---|---|
+| CI | [![CI][ciBadge]][ciLink] |
+| Format | v4, experimental |
+| CLI and C API | working |
+| Text transform and BLAKE3 digest | working |
+| Decoder | hardened and fuzzed |
+| Documentation | [`FORMAT.md`](docs/FORMAT.md), [`DESIGN.md`](docs/DESIGN.md) |
+
 **Status: working, format still experimental.** Format v4, a small CLI, a C API,
 round-trip and hardening tests, coverage fuzzing, and CI on Linux x86-64, Linux
 AArch64 and macOS AArch64 (plus Windows x86/x64 builds validated in virtual
@@ -254,3 +263,6 @@ the harness. Both are fixed; the corpus is regenerated on every run.
 
 MIT. See [`LICENSE`](LICENSE). Vendored: libsais and libbsc (Apache-2.0),
 pjablake3 (MIT).
+
+[ciBadge]: https://github.com/YadeWira/tovyCT/actions/workflows/ci.yml/badge.svg "Continuous Integration"
+[ciLink]: https://github.com/YadeWira/tovyCT/actions/workflows/ci.yml

@@ -73,8 +73,20 @@ fi
 "$OUT/tvct.exe" d /tmp/tvct-utf8-auto.tvct /tmp/tvct-utf8.out -T 2
 cmp /tmp/tvct-utf8.txt /tmp/tvct-utf8.out
 
+# Segmented entropy stage (format v5), same path as the Linux suite.
+"$OUT/tvct.exe" c /tmp/tvct-prose.txt /tmp/tvct-seg.tvct -b 1 -S 2 -T 2
+"$OUT/tvct.exe" i /tmp/tvct-seg.tvct | grep -q 'v5' || {
+  echo "FAIL: a segmented stream is not marked v5" >&2
+  exit 1
+}
+"$OUT/tvct.exe" d /tmp/tvct-seg.tvct /tmp/tvct-seg.out -T 4
+cmp /tmp/tvct-prose.txt /tmp/tvct-seg.out
+"$OUT/tvct.exe" d /tmp/tvct-seg.tvct /tmp/tvct-seg1.out -T 1
+cmp /tmp/tvct-prose.txt /tmp/tvct-seg1.out
+
 # Same line as .github/test.sh so the determinism job can compare it.
 sha256sum /tmp/tvct-sample.tvct | cut -d' ' -f1 > /tmp/tvct-sample.sha
 sha256sum /tmp/tvct-prose.tvct | cut -d' ' -f1 > /tmp/tvct-prose.sha
-echo "sample:$(cat /tmp/tvct-sample.sha) prose:$(cat /tmp/tvct-prose.sha)" > hash.txt
+sha256sum /tmp/tvct-seg.tvct | cut -d' ' -f1 > /tmp/tvct-seg.sha
+echo "sample:$(cat /tmp/tvct-sample.sha) prose:$(cat /tmp/tvct-prose.sha) seg:$(cat /tmp/tvct-seg.sha)" > hash.txt
 echo "compressed samples: $(cat hash.txt)"

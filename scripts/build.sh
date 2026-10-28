@@ -23,6 +23,7 @@ cd "$(dirname "$0")/.."
 TARGET=host
 USE_LIBSAIS=0
 DEBUG=0
+PROFILE=0
 PORTABLE=0
 CHECKS=0
 FPCSTRIP=
@@ -33,6 +34,7 @@ while [ $# -gt 0 ]; do
     --libsais) USE_LIBSAIS=1; shift ;;
     --debug) DEBUG=1; shift ;;
     --checked) CHECKS=1; shift ;;
+    --profile) PROFILE=1; shift ;;
     --portable) PORTABLE=1; shift ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
@@ -112,6 +114,11 @@ else
   FPCOPT="-O3"; MODE=""
 fi
 
+if [ "$PROFILE" = 1 ]; then
+  # Optimised but with symbols, for perf and callgrind.
+  FPCOPT="-O3"; MODE="-g"; CFLAGS="$CFLAGS -g"
+fi
+
 if [ "$CHECKS" = 1 ]; then
   FPCOPT="-O1 -Cr -Co"; MODE="-g -gl"
   CFLAGS="$CFLAGS -O1 -g"
@@ -163,8 +170,9 @@ fi
 $CC $CFLAGS -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
 $CC $CFLAGS -c src/c/tvct_text.c -o "$OUT/lib/tvct_text.o"
 $CC $CFLAGS -c src/c/tvct_guard.c -o "$OUT/lib/tvct_guard.o"
+$CC $CFLAGS -c src/c/tvct_crc.c -o "$OUT/lib/tvct_crc.o"
 $AR rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o" "$OUT/lib/tvct_text.o" \
-    "$OUT/lib/tvct_guard.o"
+    "$OUT/lib/tvct_guard.o" "$OUT/lib/tvct_crc.o"
 LIBS="$LIBS -Fl$OUT/lib"
 
 # libbsc coder (C++), the entropy backend.

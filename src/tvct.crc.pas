@@ -1,8 +1,10 @@
 {
-  tvct.crc.pas - CRC-32C (Castagnoli), table driven.
+  tvct.crc.pas - CRC-32C (Castagnoli).
 
-  The hardware kernels (SSE4.2 crc32, AArch64 crc32) come later; this is the
-  portable baseline used to detect a corrupt block.
+  The loop lives in C (src/c/tvct_crc.c) so it can use the hardware instruction:
+  SSE4.2 `crc32` on x86, `crc32cd` on AArch64, and a slicing-by-8 table when the
+  CPU does not have it. Both paths produce the same bytes, so the compressed
+  stream never depends on which one ran.
 }
 unit tvct.crc;
 
@@ -15,39 +17,12 @@ function Crc32c(Crc: LongWord; const Data; Len: SizeInt): LongWord;
 
 implementation
 
-var
-  Table: array[0..255] of LongWord;
-
-procedure InitTable;
-var
-  i, k: LongWord;
-  c: LongWord;
-begin
-  for i := 0 to 255 do
-  begin
-    c := i;
-    for k := 0 to 7 do
-      if (c and 1) <> 0 then
-        c := (c shr 1) xor $82F63B78
-      else
-        c := c shr 1;
-    Table[i] := c;
-  end;
-end;
+function tvct_crc32c(Crc: LongWord; const Data; Len: SizeInt): LongWord;
+  cdecl; external name 'tvct_crc32c';
 
 function Crc32c(Crc: LongWord; const Data; Len: SizeInt): LongWord;
-var
-  p: PByte;
-  i: SizeInt;
 begin
-  p := @Data;
-  Crc := not Crc;
-  for i := 0 to Len - 1 do
-    Crc := Table[(Crc xor p[i]) and $FF] xor (Crc shr 8);
-  Result := not Crc;
+  Result := tvct_crc32c(Crc, Data, Len);
 end;
-
-initialization
-  InitTable;
 
 end.

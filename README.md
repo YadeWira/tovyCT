@@ -17,8 +17,7 @@ round-trip and hardening tests, coverage fuzzing, and CI on Linux x86-64, Linux
 AArch64 and macOS AArch64 (plus Windows x86/x64 builds validated in virtual
 machines). The format is specified in [`docs/FORMAT.md`](docs/FORMAT.md) and may
 still change; the measurements and the design that was dropped are in
-[`docs/DESIGN.md`](docs/DESIGN.md). The zpaq-std integration thread is in
-[`docs/ZPAQ-STD.md`](docs/ZPAQ-STD.md).
+[`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## What it is meant to be
 

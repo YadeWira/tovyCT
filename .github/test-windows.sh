@@ -3,7 +3,7 @@
 # script uses the build path without .exe and cannot be shared.
 set -e
 cd "$(dirname "$0")/.."
-OUT=build/win-native
+OUT=${TVCT_OUT:-build/win-native}
 
 find src -type f -print | LC_ALL=C sort | xargs cat > /tmp/tvct-sample.txt
 

@@ -8,6 +8,7 @@
 #   win64         Windows x86-64, XP/7 and later      build/win64/
 #   win32         Windows i386, XP/7 and later        build/win32/
 #   win-native    Windows x86-64 on a Windows host    build/win-native/
+#   win-native32  Windows i386 on a Windows host      build/win-native32/
 #   linux-arm64   Linux AArch64                      build/linux-arm64/
 #
 # macOS AArch64 has no target: it is the host target, built on macOS (CI).
@@ -63,6 +64,11 @@ case "$TARGET" in
     FPC=${FPC_ARM64:-fpc-aarch64}
     CFLAGS="-O3 -mcpu=cortex-a53"; EXE=""; SO="libtvct.so"; OUT=build/linux-arm64
     ;;
+  win-native32)
+    CC=${CC:-cc}; CXX=${CXX:-c++}; AR=${AR:-ar}
+    FPC=${FPC:-fpc}
+    CFLAGS="-O3 -DTVCT_PORTABLE"; EXE=".exe"; SO="tvct.dll"; OUT=build/win-native32
+    ;;
   win-native)
     CC=${CC:-cc}; CXX=${CXX:-c++}; AR=${AR:-ar}
     # The fpc driver in the combined installer refuses to select the cross
@@ -80,7 +86,7 @@ case "$TARGET" in
 esac
 
 FPC_TARGET=""
-if [ "$TARGET" = win-native ]; then
+if [ "$TARGET" = win-native ] || [ "$TARGET" = win-native32 ]; then
   FPC_TARGET=""
   # Git Bash rewrites arguments that look like POSIX paths before handing them
   # to native programs; FPC must see the -Fl paths exactly as written.
@@ -112,7 +118,7 @@ mkdir -p "$OUT/tests" "$OUT/lib" "$OUT/bsc" "$OUT/libsais" "$OUT/units"
 # Native Windows links need the mingw import libraries (kernel32, advapi32 and
 # friends). Copy the ones FPC asks for into the local lib directory: the mingw
 # path may contain spaces and cannot be passed as a single -Fl argument.
-if [ "$TARGET" = win-native ]; then
+if [ "$TARGET" = win-native ] || [ "$TARGET" = win-native32 ]; then
   for lib in libkernel32.a libadvapi32.a libuser32.a libgdi32.a libshell32.a \
              libole32.a liboleaut32.a libuuid.a libws2_32.a libmsvcrt.a \
              libmingwex.a libgcc.a libstdc++.a; do

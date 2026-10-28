@@ -74,6 +74,31 @@ for x in off best; do
   cmp /tmp/tvct-prose.txt /tmp/tvct-prose-x$x.out
 done
 
+# UTF-8 text: the transform is ASCII-only, so accented and Cyrillic letters are
+# not folded, but it must still help (or at least not hurt) and round-trip.
+python3 - <<'PY' > /tmp/tvct-utf8.txt
+text = ("El r\u00e1pido zorro salt\u00f3 sobre el perro perezoso. "
+        "Le c\u0153ur d\u00e9\u00e7u mais l'\u00e2me plut\u00f4t na\u00efve. "
+        "Gr\u00f6\u00dfe und \u00dcbermut. "
+        "\u041f\u0440\u0438\u0432\u0435\u0442, \u043c\u0438\u0440! "
+        "\u3053\u3093\u306b\u3061\u306f\u4e16\u754c\u3002 "
+        "\u4f60\u597d\u4e16\u754c\u3002\n")
+print(text * 700, end="")
+PY
+if [ -x build/test_text ]; then
+  ./build/test_text /tmp/tvct-utf8.txt
+fi
+./build/tvct c /tmp/tvct-utf8.txt /tmp/tvct-utf8-auto.tvct -b 1 -T 1
+./build/tvct c /tmp/tvct-utf8.txt /tmp/tvct-utf8-off.tvct -b 1 -x off -T 1
+a=$(stat -c%s /tmp/tvct-utf8-auto.tvct 2>/dev/null || stat -f%z /tmp/tvct-utf8-auto.tvct)
+o=$(stat -c%s /tmp/tvct-utf8-off.tvct 2>/dev/null || stat -f%z /tmp/tvct-utf8-off.tvct)
+if [ "$a" -gt "$o" ]; then
+  echo "FAIL: the text transform made the UTF-8 sample larger ($a > $o)" >&2
+  exit 1
+fi
+./build/tvct d /tmp/tvct-utf8-auto.tvct /tmp/tvct-utf8.out -T 2
+cmp /tmp/tvct-utf8.txt /tmp/tvct-utf8.out
+
 # Adaptive coder and no sample rows: a different method in the block header and
 # a serial inverse BWT, both reachable from a hostile stream.
 ./build/tvct c /tmp/tvct-sample.txt /tmp/tvct-sample-adapt.tvct -b 1 -a -s -T 1

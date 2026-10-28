@@ -38,6 +38,28 @@ for x in off best; do
   cmp /tmp/tvct-prose.txt "/tmp/tvct-prose-x$x.out"
 done
 
+# UTF-8 text: same path as the Linux suite, without the C test_text binary.
+python - <<'PY' > /tmp/tvct-utf8.txt
+import sys
+text = ("El r\u00e1pido zorro salt\u00f3 sobre el perro perezoso. "
+        "Le c\u0153ur d\u00e9\u00e7u mais l'\u00e2me plut\u00f4t na\u00efve. "
+        "Gr\u00f6\u00dfe und \u00dcbermut. "
+        "\u041f\u0440\u0438\u0432\u0435\u0442, \u043c\u0438\u0440! "
+        "\u3053\u3093\u306b\u3061\u306f\u4e16\u754c\u3002 "
+        "\u4f60\u597d\u4e16\u754c\u3002\n")
+sys.stdout.buffer.write((text * 700).encode("utf-8"))
+PY
+"$OUT/tvct.exe" c /tmp/tvct-utf8.txt /tmp/tvct-utf8-auto.tvct -b 1 -T 1
+"$OUT/tvct.exe" c /tmp/tvct-utf8.txt /tmp/tvct-utf8-off.tvct -b 1 -x off -T 1
+a=$(wc -c < /tmp/tvct-utf8-auto.tvct)
+o=$(wc -c < /tmp/tvct-utf8-off.tvct)
+if [ "$a" -gt "$o" ]; then
+  echo "FAIL: the text transform made the UTF-8 sample larger ($a > $o)" >&2
+  exit 1
+fi
+"$OUT/tvct.exe" d /tmp/tvct-utf8-auto.tvct /tmp/tvct-utf8.out -T 2
+cmp /tmp/tvct-utf8.txt /tmp/tvct-utf8.out
+
 # Same line as .github/test.sh so the determinism job can compare it.
 sha256sum /tmp/tvct-sample.tvct | cut -d' ' -f1 > /tmp/tvct-sample.sha
 sha256sum /tmp/tvct-prose.tvct | cut -d' ' -f1 > /tmp/tvct-prose.sha

@@ -114,6 +114,14 @@ one- or two-byte codes taken from bytes the block does not use (or, when too
 few are free, from the rarest ones, escaped). The dictionary travels inside the
 BWT input, so it is compressed with the rest.
 
+The transform is ASCII-only: it folds `A-Z` and builds its dictionary from
+ASCII words. Measured on Project Gutenberg UTF-8 texts with `-l fast`, `auto`
+against `off`: Spanish −0.94 %, French −1.0 %, German −0.4 to −0.75 %, Italian
+−0.08 %, Portuguese −1.0 %, Russian −1.3 to −1.4 %. Chinese and Japanese blocks
+skip it (0 %); it never made a measured file larger. Extending the dictionary to
+Unicode words is possible but the measured headroom is under a point on the
+languages tested.
+
 | input (`-l fast`) | without | with | |
 |---|---|---|---|
 | dickens (English prose, 10 MB) | 2,335,846 | 2,299,795 | -1.5 % |

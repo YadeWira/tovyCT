@@ -292,6 +292,13 @@ so the decoder walks eight independent chains instead of one serial one.
 - **Targets.** Linux x86-64 and AArch64, macOS AArch64 and Windows x86-64 and
   x86 run in CI. The 32-bit Windows build is also validated in a Windows 7 VM.
   macOS x86-64 is not built and ARMv7 was dropped by decision.
+- **The text transform is ASCII-only.** It folds `A-Z` and builds its dictionary
+  from ASCII words, so accented letters and Cyrillic do not participate. Measured
+  on Gutenberg UTF-8 books (`-l fast`, `auto` vs `off`): Spanish −0.94 %, French
+  −1.0 %, German −0.4/−0.75 %, Italian −0.08 %, Portuguese −1.0 %, Russian
+  −1.3/−1.4 %; Chinese and Japanese blocks skip it. No measured file grew. A
+  Unicode-aware version would need case mapping per script and a different
+  tokenizer for scripts without spaces; the measured headroom is under a point.
 - **Format v4 is experimental.** It may still change; there are no tags or
   releases yet and the API reports version 0.2.
 

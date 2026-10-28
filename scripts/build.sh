@@ -65,7 +65,13 @@ case "$TARGET" in
     ;;
   win-native)
     CC=${CC:-cc}; CXX=${CXX:-c++}; AR=${AR:-ar}
-    FPC=${FPC:-fpc}
+    # The fpc driver in the combined installer refuses to select the cross
+    # compiler; ppcrossx64 targets x86_64-win64 directly.
+    if [ -z "$FPC" ] && command -v ppcrossx64 >/dev/null 2>&1; then
+      FPC=ppcrossx64
+    else
+      FPC=${FPC:-fpc}
+    fi
     CFLAGS="-O3 -DTVCT_PORTABLE"; EXE=".exe"; SO="tvct.dll"; OUT=build/win-native
     ;;
   *)
@@ -75,7 +81,7 @@ esac
 
 FPC_TARGET=""
 if [ "$TARGET" = win-native ]; then
-  FPC_TARGET="-Twin64"
+  FPC_TARGET=""
   # Git Bash rewrites arguments that look like POSIX paths before handing them
   # to native programs; FPC must see the -Fl paths exactly as written.
   export MSYS2_ARG_CONV_EXCL='*'

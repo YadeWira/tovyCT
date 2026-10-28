@@ -98,6 +98,9 @@ done
 rm -rf build/fuzz/corpus_api
 mkdir -p build/fuzz/corpus_api
 cp build/fuzz/corpus_qlfc/*.tvct build/fuzz/corpus_api/ 2>/dev/null || true
+# A segmented (v5) stream: the container fuzzer then mutates the stream count
+# and the per-stream lengths, which are new parsing surface.
+./build/tvct c /tmp/tvct-seed-prose.txt build/fuzz/corpus_api/prose-seg.tvct -b 1 -S 2 >/dev/null
 clang -O1 -g -fsanitize=fuzzer,address,undefined -Ibuild \
   tests/fuzz_decode.c -Lbuild -ltvct -Wl,-rpath,"$(pwd)/build" \
   -o build/fuzz/fuzz_decode

@@ -11,9 +11,11 @@ ones. Free Pascal and C, with vectorised C kernels for the hot paths. MIT.
 | CI | [![CI][ciBadge]][ciLink] |
 | Latest release | [![Release][relBadge]][relLink] |
 
-**Status: 1.0, format v4 frozen.** Streams written by any 1.0 build decode with
-any other, and the compressed bytes are identical on every supported platform; a
-change that needs new syntax becomes v5.
+**Status: format v4 frozen, v5 optional.** Streams written by any 1.0 build
+decode with any other and the compressed bytes are identical on every supported
+platform. Version 5 only says that a block split its entropy payload into
+several independently coded streams (`-S K`); the reader takes both versions and
+a stream without it is plain v4.
 
 ## Quick start
 

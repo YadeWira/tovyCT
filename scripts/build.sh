@@ -75,7 +75,7 @@ esac
 
 FPC_TARGET=""
 if [ "$TARGET" = win-native ]; then
-  FPC_TARGET=""
+  FPC_TARGET="-Twin64"
   # Git Bash rewrites arguments that look like POSIX paths before handing them
   # to native programs; FPC must see the -Fl paths exactly as written.
   export MSYS2_ARG_CONV_EXCL='*'

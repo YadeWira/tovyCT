@@ -78,6 +78,7 @@ jobs:
         run: |
           fpc -iV
           fpc -iTP -iTO 2>&1 || true
+          find /c/tools/freepascal -iname 'ppc*.exe' 2>/dev/null | head -20
       - name: Build
         shell: bash
         run: ./scripts/build.sh --libsais --portable --target win-native

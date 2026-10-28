@@ -75,7 +75,7 @@ esac
 
 FPC_TARGET=""
 if [ "$TARGET" = win-native ]; then
-  FPC_TARGET="-Twin64 -Px86_64"
+  FPC_TARGET="-Twin64"
   # Git Bash rewrites arguments that look like POSIX paths before handing them
   # to native programs; FPC must see the -Fl paths exactly as written.
   export MSYS2_ARG_CONV_EXCL='*'
@@ -98,14 +98,9 @@ for d in $WINLIB; do
   LIBS="$LIBS -Fl$d"
 done
 
-if [ "$TARGET" = win-native ]; then
-  for lib in libstdc++.a libgcc.a; do
-    dir=$(dirname "$(cc -print-file-name=$lib)")
-    if [ -d "$dir" ] && [ "$dir" != "." ]; then
-      LIBS="$LIBS -Fl$(cygpath -m "$dir" 2>/dev/null || echo "$dir")"
-    fi
-  done
-fi
+# The compiled C++ subset uses only C allocation and memcpy, so it needs no
+# libstdc++; the cross build passes the mingw library directories only because
+# they are part of its toolchain.
 mkdir -p "$OUT/tests" "$OUT/lib" "$OUT/bsc" "$OUT/libsais" "$OUT/units"
 
 # C kernels: the inverse BWT and the text transform.

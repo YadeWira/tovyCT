@@ -66,7 +66,7 @@ case "$TARGET" in
     ;;
   win-native32)
     CC=${CC:-i686-w64-mingw32-gcc}; CXX=${CXX:-i686-w64-mingw32-g++}
-    AR=${AR:-i686-w64-mingw32-ar}
+    AR=${AR:-ar}
     FPC=${FPC:-fpc}
     CFLAGS="-O3 -DTVCT_PORTABLE"; EXE=".exe"; SO="tvct.dll"; OUT=build/win-native32
     ;;

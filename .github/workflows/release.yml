@@ -73,8 +73,45 @@ jobs:
           name: macos-aarch64
           path: tovyct-*.tar.gz
 
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal (win32 and win64)
+        shell: pwsh
+        run: |
+          $url = 'https://sourceforge.net/projects/freepascal/files/Win32/3.2.2/fpc-3.2.2.win32.and.win64.exe/download'
+          curl.exe -L --fail --retry 3 -o "$env:TEMP\fpc-setup.exe" $url
+          if (-not (Test-Path "$env:TEMP\fpc-setup.exe")) { throw 'download failed' }
+          Start-Process -Wait -FilePath "$env:TEMP\fpc-setup.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-'
+      - name: Add the toolchains to PATH
+        shell: pwsh
+        run: |
+          "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+          $roots = @('C:\FPC', 'C:\Program Files\Free Pascal', 'C:\tools\freepascal') |
+            Where-Object { Test-Path $_ }
+          $all = @($roots | ForEach-Object { Get-ChildItem $_ -Recurse -Filter fpc.exe -ErrorAction SilentlyContinue })
+          $fpc = $all | Where-Object { $_.FullName -match 'x86_64' } | Select-Object -First 1
+          if (-not $fpc) { $fpc = $all | Select-Object -First 1 }
+          if (-not $fpc) { throw 'fpc.exe not found after the installer' }
+          Split-Path $fpc.FullName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+      - name: Build
+        shell: bash
+        run: ./scripts/build.sh --libsais --portable --target win-native
+      - name: Package
+        shell: pwsh
+        run: |
+          $V = $env:GITHUB_REF_NAME.Substring(1)
+          New-Item -ItemType Directory -Force pkg | Out-Null
+          Copy-Item build/win-native/tvct.exe, build/win-native/tvct.dll, build/win-native/tvct.h, README.md, LICENSE, CHANGELOG.md pkg
+          Compress-Archive -Path pkg/* -DestinationPath "tovyct-$V-win64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: tovyct-*.zip
+
   release:
-    needs: [linux-x64, linux-arm64, macos-arm64]
+    needs: [linux-x64, linux-arm64, macos-arm64, windows-x64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

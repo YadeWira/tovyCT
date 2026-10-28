@@ -1,0 +1,3 @@
+# The CI sample hashes the source tree, so every checkout must have the same
+# line endings; Windows would otherwise convert text files to CRLF.
+* text=auto eol=lf

@@ -109,6 +109,18 @@ done
 # they are part of its toolchain.
 mkdir -p "$OUT/tests" "$OUT/lib" "$OUT/bsc" "$OUT/libsais" "$OUT/units"
 
+# Native Windows links need the mingw import libraries (kernel32, advapi32 and
+# friends). Copy the ones FPC asks for into the local lib directory: the mingw
+# path may contain spaces and cannot be passed as a single -Fl argument.
+if [ "$TARGET" = win-native ]; then
+  for lib in libkernel32.a libadvapi32.a libuser32.a libgdi32.a libshell32.a \
+             libole32.a liboleaut32.a libuuid.a libws2_32.a libmsvcrt.a \
+             libmingwex.a libgcc.a libstdc++.a; do
+    src=$(cc -print-file-name=$lib)
+    if [ -f "$src" ]; then cp "$src" "$OUT/lib/"; fi
+  done
+fi
+
 # C kernels: the inverse BWT and the text transform.
 $CC $CFLAGS -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
 $CC $CFLAGS -c src/c/tvct_text.c -o "$OUT/lib/tvct_text.o"

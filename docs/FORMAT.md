@@ -1,8 +1,9 @@
 # tovyCT stream format v4
 
-Status: **version 4**, the current format, still experimental: it may change
-again before a release, and there is no backward compatibility with v1-v3 (the
-decoder rejects any other version byte).
+Status: **version 4, stable since 1.0.** The layout below is frozen: any 1.0
+decoder reads any 1.0 stream, the compressed bytes are identical on every
+supported platform, and a change that needs new syntax becomes v5. There is no
+backward compatibility with v1-v3; the decoder rejects any other version byte.
 
 Fixed-size integers are little-endian. A **varint** is unsigned LEB128: seven
 bits per byte, least significant group first, the high bit set on every byte

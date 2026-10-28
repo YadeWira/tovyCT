@@ -13,7 +13,7 @@ library tvct;
 
 uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
-  Classes, SysUtils, tvct.codec, tvct.host, tvct.version;
+  Classes, SysUtils, tvct.codec, tvct.host, tvct.version, tvct.guard;
 
 {$I tvct.wincrt.inc}
 
@@ -102,6 +102,11 @@ begin
     Result := 8;
   if Result < 1 then
     Result := 1;
+end;
+
+function tvct_set_guard(Enable: Int32): Int32; cdecl;
+begin
+  Result := GuardEnable(Enable);
 end;
 
 function tvct_version: PChar; cdecl;

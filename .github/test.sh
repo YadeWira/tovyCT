@@ -4,6 +4,13 @@ set -e
 cd "$(dirname "$0")/.."
 BUILD=${TVCT_BUILD:-build}
 
+# The guard-page sandbox must catch a deliberate write past a buffer (or say it
+# is not available on this platform).
+./$BUILD/tvct --guard-check >/dev/null || {
+  echo "FAIL: the guard-page sandbox did not catch a fault" >&2
+  exit 1
+}
+
 # The binary reports the version it was built from.
 ./$BUILD/tvct --version | grep -q '^tovyCT [0-9]' || {
   echo "FAIL: tvct --version did not print a version" >&2

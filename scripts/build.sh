@@ -121,6 +121,9 @@ fi
 # path is well defined and does not depend on the architecture tolerating
 # misaligned accesses.
 CFLAGS="$CFLAGS -DLIBBSC_NO_UNALIGNED_ACCESS"
+# The kernels are linked into a shared library and the guard module keeps its
+# fault state in thread-local storage, which needs position-independent code.
+CFLAGS="$CFLAGS -fPIC"
 
 DEFS=""
 if [ "$CHECKS" = 1 ]; then
@@ -159,7 +162,9 @@ fi
 # C kernels: the inverse BWT and the text transform.
 $CC $CFLAGS -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
 $CC $CFLAGS -c src/c/tvct_text.c -o "$OUT/lib/tvct_text.o"
-$AR rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o" "$OUT/lib/tvct_text.o"
+$CC $CFLAGS -c src/c/tvct_guard.c -o "$OUT/lib/tvct_guard.o"
+$AR rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o" "$OUT/lib/tvct_text.o" \
+    "$OUT/lib/tvct_guard.o"
 LIBS="$LIBS -Fl$OUT/lib"
 
 # libbsc coder (C++), the entropy backend.

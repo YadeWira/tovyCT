@@ -231,6 +231,39 @@ almost linearly.
 Reference on the same corpus: bzip3 16.90 % at 7/9, bsc 17.06 % at 13.9/27,
 xz -6 20.19 % at 6/~80, bzip2 -9 20.78 % at 11/35.
 
+### Where the ratio stands
+
+The question for 1.0 was whether the pipeline can beat libbsc, the library its
+entropy coder comes from. Measured again with the 3.4.0 reference CLI, one
+thread, on the 85 MB text corpus:
+
+| setting | ratio |
+|---|---|
+| tovyCT `fast` (8 MB, static, transform) | 17.35 % |
+| bsc `-b8` (8 MB, static, LZP) | 17.33 % |
+| bsc `-b8 -p` (no preprocessing) | 17.36 % |
+| tovyCT `compact` (16 MB, static, transform) | 17.10 % |
+| bsc `-b16` | 17.06 % |
+| bsc `-b16 -p` | 17.11 % |
+| tovyCT `max` (16 MB, adaptive, transform) | 16.84 % |
+| bsc `-b16 -e2` (adaptive) | 16.90 % |
+| bsc `-b16 -e2 -p` | 16.95 % |
+| tovyCT `max -b 64` | 16.67 % |
+
+Against the coder alone tovyCT wins at every size: the text transform and the
+container more than pay for the header. Against the full bsc CLI the difference
+is its LZP stage, worth 0.03-0.05 points here. Wiring libbsc's LZP in was
+considered and rejected: it adds a preprocessing layer and its decoder for less
+than the text transform already returns, and the format was about to freeze.
+Block size is the lever that is left: 64 MB blocks reach 16.67 % for twice the
+compression time, which is what `-b` is for.
+
+A stronger entropy model was measured earlier in the project: context mixing on
+the BWT bytes reached 17.23 % at 8 MB, 0.23 points below the QLFC coder at half
+the speed, and it does not scale to the 16 MB and adaptive presets that already
+reach 16.84 %. The `max` preset beats both, so a CM stage would add a decoder
+path without moving the ratio.
+
 The entropy stage went through three designs, each measured:
 
 1. **MTF + static rANS** (the bzip2 architecture with a better alphabet coder):
@@ -264,9 +297,14 @@ so the decoder walks eight independent chains instead of one serial one.
   loads, MTF-table entries a hostile rank could read before they were written,
   and signed overflow in the adaptive mixer on hostile streams. Each access now
   has a bound that comes from the caller, and the decoder has a bounded entry
-  point for the block table. That is still an argument from measurement; a
-  guard-page sandbox around the entropy step would turn any future fault into -1
-  regardless.
+  point for the block table. That is still an argument from measurement, so the
+  decode path now also runs behind guard pages: the payload copy and every
+  output buffer end at a `PROT_NONE` page, and a fault inside the stages comes
+  back as a decode error (`src/c/tvct_guard.c`, `tvct_guard_run`). The cost
+  measured 2-4 % of decode speed, inside the noise. It is per thread, restores
+  the previous handler for faults that are not ours, and is opt-in for library
+  callers because a library should not install a `SIGSEGV` handler behind its
+  host's back; the command line turns it on. Windows has no implementation.
 - **Fuzzing was initially misconfigured, and the numbers said so too late.** The
   first campaign reported 80M executions with the seed corpus of an older format
   and an uninstrumented shared library: coverage was 5 edges (the harness only)
@@ -296,11 +334,18 @@ so the decoder walks eight independent chains instead of one serial one.
   from ASCII words, so accented letters and Cyrillic do not participate. Measured
   on Gutenberg UTF-8 books (`-l fast`, `auto` vs `off`): Spanish −0.94 %, French
   −1.0 %, German −0.4/−0.75 %, Italian −0.08 %, Portuguese −1.0 %, Russian
-  −1.3/−1.4 %; Chinese and Japanese blocks skip it. No measured file grew. A
-  Unicode-aware version would need case mapping per script and a different
-  tokenizer for scripts without spaces; the measured headroom is under a point.
-- **Format v4 is experimental.** It may still change; there are no tags or
-  releases yet and the API reports version 0.2.
+  −1.3/−1.4 %; Chinese and Japanese blocks skip it. No measured file grew.
+  A version that also accepted UTF-8 words into the dictionary was built and
+  measured, and it made things worse: Russian grew 0.55 points (449,371 →
+  451,847 bytes on the 2 MB book, 740,682 → 744,052 on the 3.3 MB one) and most
+  Latin books 0.05-0.15 points, while Spanish and one French book gained 0.02.
+  The BWT already models those words; a code that saves bytes before it does not
+  save bits after it. Reverted, and the format never carried it.
+- **Format v4 is frozen at 1.0.** Any 1.0 build decodes any 1.0 stream on any
+  of the six targets, and the compressed bytes are identical across them. A
+  change that needs new syntax, a new transform code or a different header
+  becomes v5; v4 keeps its decoder. The C ABI follows the same rule: functions
+  are only added.
 
 ## 5. Licence hygiene
 

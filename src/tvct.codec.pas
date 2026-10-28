@@ -32,7 +32,7 @@ interface
 
 uses
   Classes, SysUtils, tvct.sais, tvct.bwt, tvct.kernels, tvct.bsc, tvct.crc,
-  pjablake3;
+  tvct.guard, pjablake3;
 
 const
   CODEC_VERSION = 4;
@@ -466,12 +466,61 @@ end;
 { Decodes the body in Job.Blk into Job.Data (Job.N bytes). Everything that
   indexes a buffer is checked here first: this is where a corrupt stream that
   got past the body CRC ends up. }
+type
+  { Everything the guarded stages need. Allocated outside GuardRun, so the
+    buffers can be freed however the run ends. }
+  TGuardDecode = record
+    Pay: PByte;
+    PayLen: Int32;
+    Bwt: PByte;
+    T, Primary: Int32;
+    Samples: PInt32;
+    NSamples: Int32;
+    Text: PByte;
+    Dst: PByte;
+    N: Int32;
+    Coder: Int32;
+    R: Int32;
+    Ok: Boolean;
+  end;
+
+{ The two C stages inside the sandbox: a fault in either one comes back from
+  GuardRun as a failed block instead of a crash. }
+procedure GuardDecodeStages(Ctx: Pointer); cdecl;
+var
+  C: ^TGuardDecode;
+begin
+  C := Ctx;
+  C^.R := bsc_coder_decompress_bounded(C^.Pay, C^.PayLen, C^.Bwt, C^.T,
+                                       C^.Coder, 0);
+  if C^.R <> C^.T then
+    Exit;
+  if C^.Text <> nil then
+  begin
+    kernel_bwt_inverse(C^.Bwt, C^.T, C^.Primary, C^.Samples, C^.NSamples,
+                       SAMPLE_RATE, C^.Text);
+    C^.Ok := tvct_text_decode(C^.Text, C^.T, C^.Dst, C^.N) = 0;
+  end
+  else
+  begin
+    kernel_bwt_inverse(C^.Bwt, C^.T, C^.Primary, C^.Samples, C^.NSamples,
+                       SAMPLE_RATE, C^.Dst);
+    C^.Ok := True;
+  end;
+end;
+
+{ Decodes the body in Job.Blk into Job.Data (Job.N bytes). Everything that
+  indexes a buffer is checked here first: this is where a corrupt stream that
+  got past the body CRC ends up. The payload and every output buffer end at a
+  guard page, so the stages run inside one: a fault is a failed block. }
 function DecodeBlock(var Job: TBlockJob): Boolean;
 var
-  Pos, T, Primary, NSamples, k, R: Int32;
+  Pos, T, Primary, NSamples, k, PayLen: Int32;
   V: QWord;
+  Ctx: TGuardDecode;
+  Pay: PByte;
   Samples: PInt32;
-  BwtBuf, TextBuf: PByte;
+  BwtBuf, TextBuf, Dst: PByte;
   IsText: Boolean;
 begin
   Result := False;
@@ -494,42 +543,66 @@ begin
   if Job.BlkLen - Pos <= NSamples * 4 then   { the payload needs a byte too }
     Exit;
 
+  Pay := nil;
   Samples := nil;
   BwtBuf := nil;
   TextBuf := nil;
+  Dst := nil;
   try
     if NSamples > 0 then
     begin
-      { Copied out: the rows are not 4-byte aligned inside the body. }
-      GetMem(Samples, NSamples * SizeOf(Int32));
-      Move(Job.Blk[Pos], Samples[0], NSamples * 4);
+      Samples := GuardAlloc(NSamples * SizeOf(Int32));
+      if Samples = nil then
+        Exit;
+      { The rows are not 4-byte aligned inside the body. }
+      Move(Job.Blk[Pos], Samples^, NSamples * 4);
       Inc(Pos, NSamples * 4);
       for k := 0 to NSamples - 1 do
         if (Samples[k] < 0) or (Samples[k] > T) then
           Exit;
     end;
-    GetMem(BwtBuf, T + 1);
-    R := bsc_coder_decompress_bounded(@Job.Blk[Pos], Job.BlkLen - Pos, BwtBuf, T,
-                                      Job.Method and 3, 0);
-    if R <> T then
+    { The payload is copied so that reads past its end fault too. }
+    PayLen := Job.BlkLen - Pos;
+    Pay := GuardAlloc(PayLen);
+    if Pay = nil then
+      Exit;
+    Move(Job.Blk[Pos], Pay^, PayLen);
+    BwtBuf := GuardAlloc(T + 1);
+    Dst := GuardAlloc(Job.N);
+    if (BwtBuf = nil) or (Dst = nil) then
       Exit;
     if IsText then
     begin
-      GetMem(TextBuf, T);
-      kernel_bwt_inverse(BwtBuf, T, Primary, Samples, NSamples, SAMPLE_RATE,
-                         TextBuf);
-      Result := tvct_text_decode(TextBuf, T, Job.Data, Job.N) = 0;
-    end
-    else
-    begin
-      kernel_bwt_inverse(BwtBuf, T, Primary, Samples, NSamples, SAMPLE_RATE,
-                         Job.Data);
-      Result := True;
+      TextBuf := GuardAlloc(T);
+      if TextBuf = nil then
+        Exit;
     end;
+
+    Ctx.Pay := Pay;
+    Ctx.PayLen := PayLen;
+    Ctx.Bwt := BwtBuf;
+    Ctx.T := T;
+    Ctx.Primary := Primary;
+    Ctx.Samples := Samples;
+    Ctx.NSamples := NSamples;
+    Ctx.Text := TextBuf;
+    Ctx.Dst := Dst;
+    Ctx.N := Job.N;
+    Ctx.Coder := Job.Method and 3;
+    Ctx.R := -1;
+    Ctx.Ok := False;
+    if GuardRun(@GuardDecodeStages, @Ctx) <> 0 then
+      Exit;                                  { the stream stepped on a guard }
+    if not Ctx.Ok then
+      Exit;
+    Move(Dst^, Job.Data^, Job.N);
+    Result := True;
   finally
-    FreeMem(TextBuf);
-    FreeMem(BwtBuf);
-    FreeMem(Samples);
+    if TextBuf <> nil then GuardFree(TextBuf, T);
+    if Dst <> nil then GuardFree(Dst, Job.N);
+    if BwtBuf <> nil then GuardFree(BwtBuf, T + 1);
+    if Samples <> nil then GuardFree(Samples, NSamples * SizeOf(Int32));
+    if Pay <> nil then GuardFree(Pay, PayLen);
   end;
 end;
 

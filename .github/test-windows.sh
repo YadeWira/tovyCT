@@ -5,6 +5,13 @@ set -e
 cd "$(dirname "$0")/.."
 OUT=${TVCT_OUT:-build/win-native}
 
+# Guard pages have no recovery on Windows; the command must still succeed and
+# say so.
+"$OUT/tvct.exe" --guard-check >/dev/null || {
+  echo "FAIL: --guard-check failed on Windows" >&2
+  exit 1
+}
+
 # The binary reports the version it was built from.
 "$OUT/tvct.exe" --version | grep -q '^tovyCT [0-9]' || {
   echo "FAIL: tvct --version did not print a version" >&2

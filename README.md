@@ -7,17 +7,19 @@ vectorised C kernels for the hot paths.
 |---|---|
 | CI | [![CI][ciBadge]][ciLink] |
 | Latest release | [![Release][relBadge]][relLink] |
-| Format | v4, experimental |
+| Format | v4, stable (frozen at 1.0) |
 | CLI and C API | working |
 | Text transform and BLAKE3 digest | working |
 | Decoder | hardened and fuzzed |
 | Documentation | [`FORMAT.md`](docs/FORMAT.md), [`DESIGN.md`](docs/DESIGN.md) |
 
-**Status: working, format still experimental.** Format v4, a small CLI, a C API,
-round-trip and hardening tests, coverage fuzzing, and CI on Linux x86-64, Linux
-AArch64, Linux x86 (32-bit), macOS AArch64, Windows x86-64 and Windows x86. The format is specified in [`docs/FORMAT.md`](docs/FORMAT.md) and may
-still change; the measurements and the design that was dropped are in
-[`docs/DESIGN.md`](docs/DESIGN.md).
+**Status: 1.0, format frozen.** Format v4 no longer changes: streams written by
+any 1.0 build decode with any other, and a future change that needs new syntax
+becomes v5. A small CLI, a C API, round-trip and hardening tests, coverage
+fuzzing, and CI on Linux x86-64, Linux AArch64, Linux x86 (32-bit), macOS
+AArch64, Windows x86-64 and Windows x86. The format is specified in
+[`docs/FORMAT.md`](docs/FORMAT.md); the measurements and the designs that were
+dropped are in [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## What it is meant to be
 
@@ -67,6 +69,9 @@ tvct t <input>                           verify the CRCs without writing output
 tvct i <input>                           show the header and the original size
 tvct --version                           print the version (also tvct_version())
 ```
+
+Decoding runs under a guard-page sandbox by default (see
+[Decoder safety](#decoder-safety)); `--no-guard` turns it off.
 
 Output defaults to `<input>.tvct` when compressing and the name without that
 suffix when decompressing. `-T 1` forces the sequential path; by default it uses
@@ -191,14 +196,25 @@ On the 85 MB text corpus, one thread unless noted:
 | tovyCT `fast` | 17.35 % | 16.9 MB/s | 31.5 MB/s |
 | tovyCT `max`, 8 threads | 16.84 % | 37.3 MB/s | 30.7 MB/s |
 | tovyCT `max` | 16.84 % | 9.9 MB/s | 10.4 MB/s |
-| libbsc 3.3.12 (reference CLI) | 17.33 % | 17.5 MB/s | 29.5 MB/s |
+| libbsc 3.4.0 (reference CLI, 8 MB blocks) | 17.33 % | 20 MB/s | 29.5 MB/s |
 | bzip3 | 16.90 % | 7 MB/s | 9 MB/s |
 | xz -6 | 20.19 % | 6 MB/s | ~80 MB/s |
 | bzip2 -9 | 20.78 % | 11 MB/s | 35 MB/s |
 | zstd -19 | 20.18 % | 4 MB/s | 1087 MB/s |
 
-The libbsc row is the CLI of the version tovyCT vendored until the 3.4.0
-upgrade; 3.4.0 writes the same bytes on this corpus, so the numbers still apply.
+The libbsc row is the 3.4.0 CLI with its default LZP preprocessing, on the same
+corpus and block size. At 16 MB blocks it produces 17.06 % (static coder) and
+16.90 % (adaptive); tovyCT produces 17.10 % with `compact` — which also carries
+the text transform and the container — and 16.84 % with `max`, 0.06 points
+smaller than bsc's adaptive coder. With preprocessing disabled (`-p`) bsc is
+17.36 % and 16.95 %, behind tovyCT at both sizes.
+
+The remaining gap at 8 and 16 MB is bsc's LZP stage, measured at 0.03-0.05
+points on this corpus. It is not wired in on purpose: a preprocessing stage
+would add a second format layer and its own decoder to guard, for less than the
+text transform already gives (0.11 points on English prose, up to 1.5 on
+caps-heavy prose). Block size is the stronger knob: `max -b 64` reaches
+16.67 % for about twice the time.
 
 Decoding runs in C kernels: the encoder stores the LF-chain row of every
 4096-byte output chunk (taken from the inverse suffix array, about 0.1 % of the
@@ -250,6 +266,21 @@ every run and every rank, and has a bounded entry point
 limit and the end of the input are parameters of the decode call, so parallel
 blocks share no state; a thread-local copy was the first attempt, but it did not
 survive the Windows static-library link and made two-block decodes fail there.
+
+On top of the checks, the decode path runs in a sandbox. Every buffer it writes
+to — the QLFC output, the transformed block, the final block — and the copy of
+the compressed payload it reads from end exactly at a page mapped `PROT_NONE`,
+so a read or write one byte past either buffer faults at that byte instead of
+touching the next allocation. `tvct_guard_run()` catches the fault and returns a
+decode error, so a hostile stream costs a failed block, not the process. It is
+per thread (parallel blocks are sandboxed independently), it restores the
+previous handler when a fault is not ours, and it costs 2-4 % of decode speed
+(46-49 MB/s against 48-49 on the 85 MB corpus, within run-to-run noise). The
+command line enables it because it owns the process; a library leaves the choice
+to its host and `tvct_set_guard(1)` is the opt-in. Windows has no implementation
+— the allocations stay plain there — and `tvct --guard-check` reports that.
+`--guard-check` writes one byte past a guarded buffer and succeeds only when the
+fault is caught, which is how CI tests the mechanism on every run.
 
 The evidence is measurement, not proof:
 

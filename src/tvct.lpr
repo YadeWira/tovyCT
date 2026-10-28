@@ -16,7 +16,8 @@ program tvct;
 
 uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
-  Classes, SysUtils, DateUtils, tvct.codec, tvct.host, tvct.version;
+  Classes, SysUtils, DateUtils, tvct.codec, tvct.host, tvct.version,
+  tvct.guard;
 
 {$I tvct.wincrt.inc}
 
@@ -51,6 +52,7 @@ begin
   WriteLn('              (32 MiB when the input fits in a single block)');
   WriteLn('  tvct i <input>                    show header');
   WriteLn('  tvct --version                    print the version');
+  WriteLn('  --no-guard                        do not use guard pages when decoding');
 end;
 
 function DefaultOutput(const Path: string; Compress: Boolean): string;
@@ -249,6 +251,26 @@ begin
     Halt(0);
   end;
 
+  if (ParamCount >= 1) and (ParamStr(1) = '--guard-check') then
+  begin
+    if not GuardAvailable then
+    begin
+      WriteLn('guard pages: not available on this platform');
+      Halt(0);
+    end;
+    if GuardSelfTest then
+    begin
+      WriteLn('guard pages: fault caught and reported');
+      Halt(0);
+    end;
+    WriteLn('guard pages: the fault was not caught');
+    Halt(1);
+  end;
+
+  { Decoding runs untrusted streams in this process, so the sandbox is on
+    unless the caller turns it off. A library leaves that choice to its host. }
+  GuardEnable(1);
+
   if ParamCount < 2 then
   begin
     Usage;
@@ -276,6 +298,8 @@ begin
       Coder := CODER_ADAPTIVE
     else if ParamStr(i) = '-s' then
       NoSamples := True
+    else if ParamStr(i) = '--no-guard' then
+      GuardEnable(0)
     else if ParamStr(i) = '-H' then
       WithDigest := True
     else if ParamStr(i) = '-x' then

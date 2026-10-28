@@ -18,6 +18,12 @@ extern "C" {
 /* Version string, static storage. */
 const char *tvct_version(void);
 
+/* Turns on guard pages around the decode buffers and recovers from a fault
+ * instead of dying: a hostile or corrupt stream becomes a decode error. Off by
+ * default, because it installs a SIGSEGV/SIGBUS handler for the process; the
+ * command line turns it on. Returns the previous state. */
+int tvct_set_guard(int enable);
+
 /* Worst-case compressed size for src_size bytes. */
 size_t tvct_compress_bound(size_t src_size);
 

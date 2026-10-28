@@ -7,9 +7,9 @@ on:
 permissions:
   contents: write
 
-# Builds the three platforms the hosted runners can build and attaches the
-# binaries to the tag. The Windows x86/x64 executables are cross-built and
-# validated in VMs, then uploaded by hand to the same release.
+# Builds all six supported platforms on hosted runners and attaches the
+# binaries to the tag. Each job compiles its own target; the tests run in the
+# ci workflow.
 
 jobs:
   linux-x64:

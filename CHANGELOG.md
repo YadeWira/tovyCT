@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 — 2026-10-28
 
 - **Linux x86 (i386)** target, CI and release package; the compressed bytes are
   identical to the 64-bit build.

@@ -110,8 +110,47 @@ jobs:
           name: windows-x64
           path: tovyct-*.zip
 
+  windows-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal (win32 and win64)
+        shell: pwsh
+        run: |
+          $url = 'https://sourceforge.net/projects/freepascal/files/Win32/3.2.2/fpc-3.2.2.win32.and.win64.exe/download'
+          curl.exe -L --fail --retry 3 -o "$env:TEMP\fpc-setup.exe" $url
+          if (-not (Test-Path "$env:TEMP\fpc-setup.exe")) { throw 'download failed' }
+          Start-Process -Wait -FilePath "$env:TEMP\fpc-setup.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-'
+      - name: Install the 32-bit mingw toolchain
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'C:\msys64\mingw32\bin\i686-w64-mingw32-gcc.exe')) {
+            & 'C:\msys64\usr\bin\bash.exe' -lc 'pacman -Sy --noconfirm --needed mingw-w64-i686-gcc'
+          }
+      - name: Add the toolchains to PATH
+        shell: pwsh
+        run: |
+          "C:\msys64\mingw32\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+          $fpc = Get-ChildItem C:\FPC -Recurse -Filter fpc.exe | Select-Object -First 1
+          if (-not $fpc) { throw 'fpc.exe not found after the installer' }
+          Split-Path $fpc.FullName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+      - name: Build
+        shell: bash
+        run: ./scripts/build.sh --libsais --portable --target win-native32
+      - name: Package
+        shell: pwsh
+        run: |
+          $V = $env:GITHUB_REF_NAME.Substring(1)
+          New-Item -ItemType Directory -Force pkg | Out-Null
+          Copy-Item build/win-native32/tvct.exe, build/win-native32/tvct.dll, build/win-native32/tvct.h, README.md, LICENSE, CHANGELOG.md pkg
+          Compress-Archive -Path pkg/* -DestinationPath "tovyct-$V-win32.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86
+          path: tovyct-*.zip
+
   release:
-    needs: [linux-x64, linux-arm64, macos-arm64, windows-x64]
+    needs: [linux-x64, linux-arm64, macos-arm64, windows-x64, windows-x86]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

@@ -15,8 +15,7 @@ vectorised C kernels for the hot paths.
 
 **Status: working, format still experimental.** Format v4, a small CLI, a C API,
 round-trip and hardening tests, coverage fuzzing, and CI on Linux x86-64, Linux
-AArch64, macOS AArch64 and Windows x86-64 (with the 32-bit Windows build
-validated in a Windows 7 VM). The format is specified in [`docs/FORMAT.md`](docs/FORMAT.md) and may
+AArch64, macOS AArch64, Windows x86-64 and Windows x86 (32-bit). The format is specified in [`docs/FORMAT.md`](docs/FORMAT.md) and may
 still change; the measurements and the design that was dropped are in
 [`docs/DESIGN.md`](docs/DESIGN.md).
 
@@ -41,20 +40,19 @@ Supported targets:
 | Linux | x86-64 | built and tested on the host |
 | Linux | AArch64 | built and tested in CI; output is byte-identical to x86-64 |
 | Windows (7 and later) | x86-64 | built and tested in CI on a Windows runner; also validated in a Windows 10 VM |
-| Windows (7 and later) | x86 | built here, tested in a Windows 7 VM |
+| Windows (7 and later) | x86 | built and tested in CI on a Windows runner; also validated in a Windows 7 VM |
 | macOS | AArch64 | built and tested in GitHub Actions |
 
-Windows x86-64 is built natively in CI with the official Free Pascal installer
-and MSYS2's mingw-w64. The 32-bit build needs the Free Pascal cross compiler,
-which the hosted runners do not carry; it is built here and validated in a
-Windows 7 virtual machine.
+Both Windows targets are built natively in CI with the official Free Pascal
+installer and MSYS2's mingw-w64 (mingw64 and mingw32). The 32-bit binary is
+also validated in a Windows 7 virtual machine.
 
 ## CI
 
 `.github/workflows/ci.yml` builds and tests Linux x86-64, Linux AArch64,
-macOS AArch64 and Windows x86-64, then compares the SHA-256 of a compressed
-sample across the four jobs: the compressed output is byte-identical on every
-architecture. The unit tests, the C API tests, the text transform test, the
+macOS AArch64, Windows x86-64 and Windows x86, then compares the SHA-256 of a
+compressed sample across the five jobs: the compressed output is byte-identical
+on every architecture. The unit tests, the C API tests, the text transform test, the
 BLAKE3 known-answer test and full stream round-trips run in each job; a
 generated prose sample makes sure the text transform is on the tested path.
 

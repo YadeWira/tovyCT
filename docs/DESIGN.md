@@ -288,8 +288,8 @@ so the decoder walks eight independent chains instead of one serial one.
   decoding, and the stream must end right there. It is a stronger declared
   integrity check than CRC-32C, but it travels in the file and therefore cannot
   stop a deliberate forgery; the per-block CRC remains the corruption check.
-- **Targets.** Linux x86-64 and AArch64, macOS AArch64 and Windows x86-64 run
-  in CI; Windows x86 is cross-built here and validated in a Windows 7 VM.
+- **Targets.** Linux x86-64 and AArch64, macOS AArch64 and Windows x86-64 and
+  x86 run in CI. The 32-bit Windows build is also validated in a Windows 7 VM.
   macOS x86-64 is not built and ARMv7 was dropped by decision.
 - **Format v4 is experimental.** It may still change; there are no tags or
   releases yet and the API reports version 0.2.

@@ -7,6 +7,7 @@
 #   host          this machine (default)              build/
 #   win64         Windows x86-64, XP/7 and later      build/win64/
 #   win32         Windows i386, XP/7 and later        build/win32/
+#   win-native    Windows x86-64 on a Windows host    build/win-native/
 #   linux-arm64   Linux AArch64                      build/linux-arm64/
 #
 # macOS AArch64 has no target: it is the host target, built on macOS (CI).
@@ -62,10 +63,24 @@ case "$TARGET" in
     FPC=${FPC_ARM64:-fpc-aarch64}
     CFLAGS="-O3 -mcpu=cortex-a53"; EXE=""; SO="libtvct.so"; OUT=build/linux-arm64
     ;;
+  win-native)
+    CC=${CC:-cc}; CXX=${CXX:-c++}; AR=${AR:-ar}
+    FPC=${FPC:-fpc}
+    CFLAGS="-O3 -DTVCT_PORTABLE"; EXE=".exe"; SO="tvct.dll"; OUT=build/win-native
+    ;;
   *)
     echo "unknown target: $TARGET" >&2; exit 1
     ;;
 esac
+
+# FPC is a Windows program when the target is win-native, so the paths given to
+# it must be in Windows form; the C compiler and ar understand the POSIX ones.
+ROOT=$(pwd)
+FPC_TARGET=""
+if [ "$TARGET" = win-native ]; then
+  ROOT=$(cygpath -m "$(pwd)" 2>/dev/null || pwd)
+  FPC_TARGET="-Twin64 -Px86_64"
+fi
 
 if [ "$DEBUG" = 1 ]; then
   FPCOPT="-O1"; MODE="-g -gl"; CFLAGS="-O1 -g"
@@ -83,16 +98,23 @@ LIBS=""
 for d in $WINLIB; do
   LIBS="$LIBS -Fl$d"
 done
+
+if [ "$TARGET" = win-native ]; then
+  STDCXX_DIR=$(dirname "$(cc -print-file-name=libstdc++.a)")
+  if [ -d "$STDCXX_DIR" ] && [ "$STDCXX_DIR" != "." ]; then
+    LIBS="$LIBS -Fl$(cygpath -m "$STDCXX_DIR" 2>/dev/null || echo "$STDCXX_DIR")"
+  fi
+fi
 mkdir -p "$OUT/tests" "$OUT/lib" "$OUT/bsc" "$OUT/libsais" "$OUT/units"
 
 # C kernels: the inverse BWT and the text transform.
 $CC $CFLAGS -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
 $CC $CFLAGS -c src/c/tvct_text.c -o "$OUT/lib/tvct_text.o"
 $AR rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o" "$OUT/lib/tvct_text.o"
-LIBS="$LIBS -Fl$(pwd)/$OUT/lib"
+LIBS="$LIBS -Fl$ROOT/$OUT/lib"
 
 # libbsc coder (C++), the entropy backend.
-BSC="$(pwd)/third_party/libbsc/src"
+BSC="$ROOT/third_party/libbsc/src"
 $CXX $CFLAGS -c "$BSC/coder/coder.cpp" -o "$OUT/bsc/coder.o"
 $CXX $CFLAGS -c "$BSC/coder/qlfc/qlfc.cpp" -o "$OUT/bsc/qlfc.o"
 $CXX $CFLAGS -c "$BSC/coder/qlfc/qlfc_model.cpp" -o "$OUT/bsc/qlfc_model.o"
@@ -100,13 +122,13 @@ $CXX $CFLAGS -c "$BSC/platform/platform.cpp" -o "$OUT/bsc/platform.o"
 $CXX $CFLAGS -c "$BSC/adler32/adler32.cpp" -o "$OUT/bsc/adler32.o"
 $AR rcs "$OUT/bsc/libbsc.a" "$OUT/bsc/coder.o" "$OUT/bsc/qlfc.o" \
     "$OUT/bsc/qlfc_model.o" "$OUT/bsc/platform.o" "$OUT/bsc/adler32.o"
-LIBS="$LIBS -Fl$(pwd)/$OUT/bsc"
+LIBS="$LIBS -Fl$ROOT/$OUT/bsc"
 
 if [ "$USE_LIBSAIS" = 1 ]; then
   $CC $CFLAGS -c third_party/libsais/libsais.c -o "$OUT/libsais/libsais.o"
   $AR rcs "$OUT/libsais/libsais.a" "$OUT/libsais/libsais.o"
   DEFS="-dTVCT_LIBSAIS"
-  LIBS="$LIBS -Fl$(pwd)/$OUT/libsais"
+  LIBS="$LIBS -Fl$ROOT/$OUT/libsais"
   echo "libsais: $OUT/libsais/libsais.a"
 else
   echo "warning: no libsais; the suffix array falls back to the Pascal SA-IS" >&2
@@ -114,20 +136,20 @@ fi
 
 for t in tests/test_sais.lpr tests/test_bwt.lpr tests/test_codec.lpr; do
   echo "== $t"
-  $FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" -Futhird_party/pjablake3 -Fi"$(pwd)/third_party/pjablake3" $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
+  $FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fi"$ROOT/src" -Futhird_party/pjablake3 -Fi"$ROOT/third_party/pjablake3" $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
       -FE"$OUT/tests" "$t"
 done
 
 echo "== third_party/pjablake3/tests/test_blake3.pas"
-$FPC -O2 -Futhird_party/pjablake3 -Fi"$(pwd)/third_party/pjablake3" -Fu"$OUT/tests" -FU"$OUT/tests" \
+$FPC -O2 $FPC_TARGET -Futhird_party/pjablake3 -Fi"$ROOT/third_party/pjablake3" -Fu"$OUT/tests" -FU"$OUT/tests" \
     -FE"$OUT/tests" third_party/pjablake3/tests/test_blake3.pas
 
 echo "== tvct"
-$FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" -Futhird_party/pjablake3 -Fi"$(pwd)/third_party/pjablake3" $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
+$FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fi"$ROOT/src" -Futhird_party/pjablake3 -Fi"$ROOT/third_party/pjablake3" $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
     -FE"$OUT" src/tvct.lpr
 
 echo "== $SO"
-$FPC $FPCOPT $MODE -Mobjfpc $DEFS -Fusrc -Fi"$(pwd)/src" -Futhird_party/pjablake3 -Fi"$(pwd)/third_party/pjablake3" $LIBS -Fu"$OUT/units" -FU"$OUT/units" \
+$FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fi"$ROOT/src" -Futhird_party/pjablake3 -Fi"$ROOT/third_party/pjablake3" $LIBS -Fu"$OUT/units" -FU"$OUT/units" \
     -o"$OUT/$SO" src/tvct.api.lpr
 cp include/tvct.h "$OUT/tvct.h"
 

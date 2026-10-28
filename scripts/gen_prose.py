@@ -35,7 +35,7 @@ def main():
             start = True
         out.append(w + sep)
         n += len(w) + len(sep)
-    sys.stdout.write("".join(out)[:size])
+    sys.stdout.buffer.write("".join(out)[:size].encode("ascii"))
 
 
 if __name__ == "__main__":

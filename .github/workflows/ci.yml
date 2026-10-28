@@ -59,6 +59,28 @@ jobs:
           name: hash-macos-arm64
           path: hash.txt
 
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal
+        run: choco install -y freepascal
+      - name: Add the toolchains to PATH
+        shell: pwsh
+        run: |
+          "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+          "C:\msys64\mingw64\bin"         | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+      - name: Build
+        shell: bash
+        run: ./scripts/build.sh --libsais --portable --target win-native
+      - name: Test
+        shell: bash
+        run: sh .github/test-windows.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hash-windows-x64
+          path: hash.txt
+
   fuzz:
     runs-on: ubuntu-latest
     steps:
@@ -71,7 +93,7 @@ jobs:
         run: sh .github/fuzz.sh 60 2
 
   determinism:
-    needs: [linux-x64, linux-arm64, macos-arm64]
+    needs: [linux-x64, linux-arm64, macos-arm64, windows-x64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

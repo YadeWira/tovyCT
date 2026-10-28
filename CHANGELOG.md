@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `tvct --version` (and `-V`) prints the release version; the CLI and
+  `tvct_version()` in the C API now read one constant in `src/tvct.version.pas`.
+- The Linux x86 release binary is stripped, like the 64-bit one (the extracted
+  32-bit compiler does not read `fpc.cfg`, so it was not stripped by default).
+
 ## 0.2.1 — 2026-10-28
 
 - **Linux x86 (i386)** target, CI and release package; the compressed bytes are

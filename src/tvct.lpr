@@ -16,7 +16,7 @@ program tvct;
 
 uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
-  Classes, SysUtils, DateUtils, tvct.codec, tvct.host;
+  Classes, SysUtils, DateUtils, tvct.codec, tvct.host, tvct.version;
 
 {$I tvct.wincrt.inc}
 
@@ -50,6 +50,7 @@ begin
   WriteLn('  -l max:     adaptive, no sample rows, 16 MiB blocks');
   WriteLn('              (32 MiB when the input fits in a single block)');
   WriteLn('  tvct i <input>                    show header');
+  WriteLn('  tvct --version                    print the version');
 end;
 
 function DefaultOutput(const Path: string; Compress: Boolean): string;
@@ -241,6 +242,13 @@ begin
 end;
 
 begin
+  if (ParamCount >= 1) and
+     ((ParamStr(1) = '--version') or (ParamStr(1) = '-V')) then
+  begin
+    WriteLn(TVCT_VERSION_DETAIL);
+    Halt(0);
+  end;
+
   if ParamCount < 2 then
   begin
     Usage;

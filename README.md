@@ -65,6 +65,7 @@ tvct c <input> [output] [-l fast|compact|max] [-b MB] [-T N] [-a] [-s]
 tvct d <input> [output] [-T N]           decompress
 tvct t <input>                           verify the CRCs without writing output
 tvct i <input>                           show the header and the original size
+tvct --version                           print the version (also tvct_version())
 ```
 
 Output defaults to `<input>.tvct` when compressing and the name without that

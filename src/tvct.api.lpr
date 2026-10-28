@@ -13,7 +13,7 @@ library tvct;
 
 uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
-  Classes, SysUtils, tvct.codec, tvct.host;
+  Classes, SysUtils, tvct.codec, tvct.host, tvct.version;
 
 {$I tvct.wincrt.inc}
 
@@ -106,7 +106,7 @@ end;
 
 function tvct_version: PChar; cdecl;
 begin
-  Result := 'tovyCT 0.2.1 (format v4)';
+  Result := TVCT_VERSION_DETAIL;
 end;
 
 function tvct_compress_bound(src_size: SizeInt): SizeInt; cdecl;

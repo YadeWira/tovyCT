@@ -25,6 +25,7 @@ USE_LIBSAIS=0
 DEBUG=0
 PORTABLE=0
 CHECKS=0
+FPCSTRIP=
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -70,7 +71,10 @@ case "$TARGET" in
   linux-x86)
     CC=${CC:-gcc}; CXX=${CXX:-g++}; AR=${AR:-ar}
     FPC=${FPC_I386:-fpc}
+    # The 32-bit FPC runs with -n (no fpc.cfg), so it does not strip by
+    # default the way the host compiler does; ask for it explicitly.
     CFLAGS="-O3 -m32"; EXE=""; SO="libtvct.so"; OUT=build/linux-x86
+    FPCSTRIP="-Xs"
     ;;
   win-native32)
     CC=${CC:-i686-w64-mingw32-gcc}; CXX=${CXX:-i686-w64-mingw32-g++}
@@ -181,7 +185,7 @@ fi
 
 for t in tests/test_sais.lpr tests/test_bwt.lpr tests/test_codec.lpr; do
   echo "== $t"
-  $FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fisrc -Futhird_party/pjablake3 -Fithird_party/pjablake3 $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
+  $FPC $FPCOPT $MODE $FPCSTRIP $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fisrc -Futhird_party/pjablake3 -Fithird_party/pjablake3 $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
       -FE"$OUT/tests" "$t"
 done
 
@@ -190,11 +194,11 @@ $FPC -O2 $FPC_TARGET -Futhird_party/pjablake3 -Fithird_party/pjablake3 -Fu"$OUT/
     -FE"$OUT/tests" third_party/pjablake3/tests/test_blake3.pas
 
 echo "== tvct"
-$FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fisrc -Futhird_party/pjablake3 -Fithird_party/pjablake3 $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
+$FPC $FPCOPT $MODE $FPCSTRIP $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fisrc -Futhird_party/pjablake3 -Fithird_party/pjablake3 $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
     -FE"$OUT" src/tvct.lpr
 
 echo "== $SO"
-$FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fisrc -Futhird_party/pjablake3 -Fithird_party/pjablake3 $LIBS -Fu"$OUT/units" -FU"$OUT/units" \
+$FPC $FPCOPT $MODE $FPCSTRIP $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fisrc -Futhird_party/pjablake3 -Fithird_party/pjablake3 $LIBS -Fu"$OUT/units" -FU"$OUT/units" \
     -o"$OUT/$SO" src/tvct.api.lpr
 cp include/tvct.h "$OUT/tvct.h"
 

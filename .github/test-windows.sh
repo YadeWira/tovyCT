@@ -5,6 +5,12 @@ set -e
 cd "$(dirname "$0")/.."
 OUT=${TVCT_OUT:-build/win-native}
 
+# The binary reports the version it was built from.
+"$OUT/tvct.exe" --version | grep -q '^tovyCT [0-9]' || {
+  echo "FAIL: tvct --version did not print a version" >&2
+  exit 1
+}
+
 find src -type f -print | LC_ALL=C sort | xargs cat > /tmp/tvct-sample.txt
 
 "$OUT/tests/test_sais.exe" /tmp/tvct-sample.txt

@@ -52,8 +52,10 @@ On an 85 MB text corpus, one thread:
 
 With 8 threads `fast` reaches 57.2 MB/s compressing and 74.1 MB/s decompressing.
 For reference, `bzip3` produces 16.90 % at 7/9 MB/s and `bsc` 17.33 % at
-20/29.5 MB/s. The full comparison is on the [Benchmarks](https://github.com/YadeWira/tovyCT/wiki/Benchmarks)
-page.
+20/29.5 MB/s. On enwik8 (100 MB of Wikipedia) at the same block size tovyCT is
+0.01-0.10 points smaller than the bsc 3.4.0 CLI: 23.76 % against 23.77 % at
+8 MiB, 22.65 % against 22.75 % at 16 MiB. The full comparisons are on the
+[Benchmarks](https://github.com/YadeWira/tovyCT/wiki/Benchmarks) page.
 
 ## Documentation
 

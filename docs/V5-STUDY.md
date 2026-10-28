@@ -78,6 +78,39 @@ Each of these was implemented, measured and reverted:
   and a second byte-identity argument. Not worth it today; the encoder is
   suffix-array bound.
 
+## An external benchmark: enwik8
+
+The Large Text Compression Benchmark (Matt Mahoney) is the usual reference for
+text compressors. enwik8 (100,000,000 bytes) measured here, same machine, one
+thread, against the bsc 3.4.0 CLI with its default LZP:
+
+| setting | ratio | compress | decompress |
+|---|---|---|---|
+| tovyCT `fast` (8 MiB blocks) | 23.76 % | 15.4 MB/s | 28.8 MB/s |
+| bsc `-b8 -e1` | 23.77 % | 20.5 MB/s | — |
+| tovyCT `compact` (16 MiB) | 22.91 % | 14.6 MB/s | 24.5 MB/s |
+| bsc `-b16 -e1` | 22.92 % | — | — |
+| tovyCT `max` (16 MiB) | 22.65 % | 9.5 MB/s | 9.1 MB/s |
+| bsc `-b16 -e2` | 22.75 % | 12.1 MB/s | — |
+| tovyCT `max -b 64` | 21.38 % | 8.7 MB/s | 7.1 MB/s |
+| bsc `-b64 -e2` | 21.48 % | 10.4 MB/s | — |
+| tovyCT `max`, one 95 MiB block | 20.70 % | 8.3 MB/s | 6.4 MB/s |
+| bsc `-b100 -e2`, one block | 20.80 % | — | — |
+
+At the same block size tovyCT is 0.01 to 0.10 points smaller than bsc on this
+corpus, which is the text transform paying for its dictionary; bsc is faster per
+thread but its CLI does not use the other cores. For reference, the benchmark
+table lists bsc-m03 at 20.29 %, bzip3 at 20.75 % and bsc 3.25 at 20.79 % on the
+same file (other hardware), and our bsc 3.4.0 run reproduces their 20.79-20.80 %
+exactly, so the measurement is comparable.
+
+The block size is the cheapest lever left and it is a v5 decision: one 95 MiB
+block buys **0.68 points** over 64 MiB blocks but decodes four times slower
+(6.4 against 28.8 MB/s), because the LF table no longer fits anywhere and the
+24-bit packing stops applying at 16 MiB, so every step costs two dependent
+loads. A v5 that raised the block limit would want the 40-bit packed entry
+first.
+
 ## What v5 would buy
 
 ### Segmented QLFC

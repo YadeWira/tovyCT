@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 — 2026-10-28
+
+Faster on both sides with the compressed bytes unchanged, plus an optional
+format extension for decoding on more threads.
 
 - **Format v5: segmented entropy payloads** (`-S K`, K = 2..8). A block may now
   carry K independently coded QLFC streams over its BWT output, so the entropy
@@ -24,7 +27,10 @@
 - `scripts/build.sh --profile` builds with `-O3 -g` for `perf` and callgrind.
 - [`docs/V5-STUDY.md`](docs/V5-STUDY.md): the profiling data behind the above,
   the optimisations that measured worse and were reverted, and what a v5 could
-  carry (segmented QLFC at 0.04 points, block size that follows the input).
+  carry (segmented QLFC, block size that follows the input).
+- enwik8 measured against the bsc 3.4.0 CLI at the same block size: 0.01 to
+  0.10 points smaller (23.76 against 23.77 % at 8 MiB, 22.65 against 22.75 % at
+  16 MiB, 21.38 against 21.48 % at 64 MiB).
 
 ## 1.0.0 — 2026-10-28
 

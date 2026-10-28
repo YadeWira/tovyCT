@@ -1,9 +1,10 @@
 # Design
 
-Status: **M0 (measurement) complete — design changed.** No codec code exists yet.
+Status: **implemented and released as 1.0**, format v4 frozen.
 
-This document records what was measured before writing the codec, why the first
-design was dropped, and what is being built instead.
+This document records what was measured before the codec was written, why the
+first design was dropped, what was built instead, and which ideas were measured
+and rejected along the way.
 
 ## 1. Corpus and baseline
 

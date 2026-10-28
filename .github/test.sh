@@ -153,5 +153,7 @@ sha() {
     shasum -a 256 "$1" | cut -d' ' -f1
   fi
 }
-echo "sample:$(sha /tmp/tvct-sample.tvct) prose:$(sha /tmp/tvct-prose.tvct)" > hash.txt
+# The v5 sample goes into the same line: the determinism job compares it across
+# platforms like the other two.
+echo "sample:$(sha /tmp/tvct-sample.tvct) prose:$(sha /tmp/tvct-prose.tvct) seg:$(sha /tmp/tvct-seg.tvct)" > hash.txt
 echo "compressed samples: $(cat hash.txt)"

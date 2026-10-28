@@ -84,7 +84,8 @@ Each of these was implemented, measured and reverted:
 
 The coder is serial: each symbol depends on the previous range and model state.
 Splitting a block's BWT output into K independent streams costs very little
-ratio, because QLFC adapts within a few hundred KiB:
+ratio, because QLFC adapts within a few hundred KiB. An 8 MiB block, static
+coder:
 
 | streams | static coder | adaptive coder |
 |---|---|---|
@@ -93,12 +94,38 @@ ratio, because QLFC adapts within a few hundred KiB:
 | 4 | 22.5389 % | 22.3804 % |
 | 8 | 22.6100 % | 22.4310 % |
 
-Two streams cost **0.04 points**. That buys two things: a block can be decoded
-by several threads when there are fewer blocks than threads (today a 16 MiB file
-at `-T 8` uses two threads), and — if the coder's loop is split so the streams
-advance together — instruction-level parallelism inside one thread, which is
-where the current speedup ceiling is. The ILP part is unproven and would be the
-first thing to prototype: a two-way interleaved decode on a single core.
+Two streams cost **0.04 points**. Decoding each stream on its own thread, on
+one socket with eight cores available:
+
+| streams / threads | static | adaptive |
+|---|---|---|
+| 1 / 1 | 22.5011 %, 35 MB/s | 22.3538 %, 15 MB/s |
+| 2 / 2 | 22.5438 %, 62 MB/s | 22.3840 %, 26 MB/s |
+| 4 / 4 | 22.5389 %, 89 MB/s | 22.3804 %, 37 MB/s |
+
+That is 1.8x with two streams and 2.5x with four, on the entropy stage, for
+0.04 points. Against `-b auto`, which reaches the same thread count by cutting
+the blocks, segmentation is much cheaper: 0.04 points instead of 1.1.
+
+### Two-way interleaving: measured, and not worth it
+
+The other reason to segment was instruction-level parallelism: interleave two
+streams in one thread so one stream's stalls are covered by the other. Before
+writing a decoder that can be stepped, the ceiling was measured two ways:
+
+- **Top-down slots** (`perf stat --topdown`) for the QLFC decode: 56.9 %
+  retiring, 17.5 % bad speculation, 17.9 % backend bound, 7.7 % frontend bound.
+  Only the backend part is latency that another stream could fill, so the best
+  case is about 20 % on the stage.
+- **Two decoders on one physical core.** Decoding K streams on the two
+  hyperthreads of one core measures the same effect without a rewrite: 40 MB/s
+  for one stream, 46 MB/s for two or four (+12-15 %). One thread with K streams
+  stays at 41-42 MB/s, as it must.
+
+So interleaving buys at most 12-15 % of the entropy stage, which is 60 % of
+decode: 7-9 % end to end, for a rewrite of the 300-line decoder state machine.
+The branch mispredictions that dominate the wasted slots (17.5 %) would not go
+away: a misprediction flushes both streams. **Not pursued.**
 
 ### Block size that follows the input (implemented as `-b auto`)
 
@@ -144,8 +171,8 @@ than QLFC is the one thing this project has not found.
 
 ## Next steps
 
-1. Prototype two-way interleaved QLFC decode and measure the single-thread gain;
-   if it is under 20 %, segmentation only pays for the thread case.
+1. ~~Prototype two-way interleaved QLFC decode~~: the ceiling is 12-15 % of the
+   stage, measured with SMT and top-down counters, so it does not pay.
 2. Measure the whole preset table with `-b auto` and decide whether the speed
    preset should default to it.
 3. Only then decide whether v5 needs new syntax at all, or whether v4 keeps

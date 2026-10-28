@@ -63,8 +63,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Free Pascal
-        run: choco install -y freepascal
+      - name: Install Free Pascal (win32 and win64)
+        shell: pwsh
+        run: |
+          $url = 'https://sourceforge.net/projects/freepascal/files/Win32/3.2.2/fpc-3.2.2.win32.and.win64.exe/download'
+          curl.exe -L --fail --retry 3 -o "$env:TEMP\fpc-setup.exe" $url
+          if (-not (Test-Path "$env:TEMP\fpc-setup.exe")) { throw 'download failed' }
+          Start-Process -Wait -FilePath "$env:TEMP\fpc-setup.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-'
+
       - name: Add the toolchains to PATH
         shell: pwsh
         run: |
@@ -78,7 +84,7 @@ jobs:
         run: |
           fpc -iV
           fpc -iTP -iTO 2>&1 || true
-          find /c/tools/freepascal -iname 'ppc*.exe' 2>/dev/null | head -20
+          find /c/FPC /c/tools/freepascal -iname 'ppc*.exe' 2>/dev/null | head -20
       - name: Build
         shell: bash
         run: ./scripts/build.sh --libsais --portable --target win-native

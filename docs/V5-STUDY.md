@@ -106,10 +106,13 @@ exactly, so the measurement is comparable.
 
 The block size is the cheapest lever left and it is a v5 decision: one 95 MiB
 block buys **0.68 points** over 64 MiB blocks but decodes four times slower
-(6.4 against 28.8 MB/s), because the LF table no longer fits anywhere and the
-24-bit packing stops applying at 16 MiB, so every step costs two dependent
-loads. A v5 that raised the block limit would want the 40-bit packed entry
-first.
+(6.4 against 28.8 MB/s). The cost is memory, not the table layout: packing the
+row and the byte into one entry is worth +45 % at 8 MiB (108 against 74 MB/s),
+but a prototype with a 40-bit entry for blocks above 16 MiB measured no gain
+(59 against 60 MB/s), because the 80 MiB LF table is already DRAM-bound and the
+second load was mostly served by the same misses. Raising the block limit is
+only worth it for archives that care about the last 0.7 points and not about
+decode speed.
 
 ## What v5 would buy
 

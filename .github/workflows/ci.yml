@@ -112,6 +112,12 @@ jobs:
           curl.exe -L --fail --retry 3 -o "$env:TEMP\fpc-setup.exe" $url
           if (-not (Test-Path "$env:TEMP\fpc-setup.exe")) { throw 'download failed' }
           Start-Process -Wait -FilePath "$env:TEMP\fpc-setup.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-'
+      - name: Install the 32-bit mingw toolchain
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'C:\msys64\mingw32\bin\i686-w64-mingw32-gcc.exe')) {
+            & 'C:\msys64\usr\bin\bash.exe' -lc 'pacman -Sy --noconfirm --needed mingw-w64-i686-gcc'
+          }
       - name: Add the toolchains to PATH
         shell: pwsh
         run: |

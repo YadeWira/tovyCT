@@ -348,6 +348,11 @@ so the decoder walks eight independent chains instead of one serial one.
   the format-level options: segmented QLFC costs 0.04 points for two streams,
   and a block size that follows the input buys twice the decode throughput on
   medium files at 0.5 points.
+- **v5 can segment the entropy stage.** `-S K` splits a block's BWT output into
+  K independently coded QLFC streams (format v5; v4 streams are unchanged and
+  the reader takes both). Measured on a 16 MiB block: +0.03 points of ratio and
+  +14 % decode with two streams at eight threads, +0.10 points and +46 % with
+  eight. See [`V5-STUDY.md`](V5-STUDY.md).
 - **Format v4 is frozen at 1.0.** Any 1.0 build decodes any 1.0 stream on any
   of the six targets, and the compressed bytes are identical across them. A
   change that needs new syntax, a new transform code or a different header

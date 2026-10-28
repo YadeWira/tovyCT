@@ -156,6 +156,22 @@ That is 1.8x with two streams and 2.5x with four, on the entropy stage, for
 0.04 points. Against `-b auto`, which reaches the same thread count by cutting
 the blocks, segmentation is much cheaper: 0.04 points instead of 1.1.
 
+**Implemented as format v5 (`-S K`)**, and measured end to end on a single
+16 MiB block decoded at `-T 8` (the case where a block has cores to spare):
+
+| streams | ratio | decode T1 | decode T8 |
+|---|---|---|---|
+| 1 (v4) | 19.5253 % | 26.3 MB/s | 25.7 MB/s |
+| 2 | 19.5545 % (+0.03) | 24.2 MB/s | 29.3 MB/s (+14 %) |
+| 4 | 19.5857 % (+0.06) | 25.5 MB/s | 34.3 MB/s (+33 %) |
+| 8 | 19.6217 % (+0.10) | 24.0 MB/s | 37.5 MB/s (+46 %) |
+
+A segmented stream says v5 in the version byte; the reader takes both, the
+blocks are otherwise identical, and a block only fans out when it has threads
+to use (the decoder gives each block `threads / blocks-in-batch`). At one
+thread the segments decode one after another and cost a few percent, which is
+the price of the model warm-up per stream.
+
 ### Two-way interleaving: measured, and not worth it
 
 The other reason to segment was instruction-level parallelism: interleave two

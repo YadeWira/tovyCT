@@ -10,7 +10,7 @@ vectorised C kernels for the hot paths.
 | Format | v4, stable (frozen at 1.0) |
 | CLI and C API | working |
 | Text transform and BLAKE3 digest | working |
-| Decoder | hardened and fuzzed |
+| Decoder | hardened, fuzzed and sandboxed |
 | Documentation | [`FORMAT.md`](docs/FORMAT.md), [`DESIGN.md`](docs/DESIGN.md) |
 
 **Status: 1.0, format frozen.** Format v4 no longer changes: streams written by

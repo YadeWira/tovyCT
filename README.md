@@ -2,8 +2,9 @@
 
 A fast text compressor with a good ratio: BWT followed by QLFC (libbsc's entropy
 coder), with a text transform in front of the BWT that folds capitals and
-replaces frequent words by short codes. Free Pascal and C, with vectorised C
-kernels for the hot paths. MIT.
+replaces frequent words by short codes. The aim is to sit within a point of the
+best BWT compressors and decode several times faster than the context-mixing
+ones. Free Pascal and C, with vectorised C kernels for the hot paths. MIT.
 
 | Component | Status |
 |---|---|

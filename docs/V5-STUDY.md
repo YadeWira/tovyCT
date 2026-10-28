@@ -1,5 +1,10 @@
 # Studies for v5: speed
 
+The goal is not to win on ratio: it is to sit within a point of the best BWT
+compressors while decoding several times faster than the context-mixing ones.
+Every measurement here is read against that: a change that trades decode speed
+for the last tenth of a point is not interesting unless it buys parallelism.
+
 Format v4 is frozen, so anything that changes the compressed bytes needs a v5.
 This document records what was measured while looking for speed **without**
 paying ratio, and separates what is free (identical bytes, shipped in v4) from
@@ -73,6 +78,14 @@ Each of these was implemented, measured and reverted:
 - **Dropping the `bp` copy** by reading the BWT through an index adjustment
   (saves 8 MiB and a copy per block). Kernel-neutral, end to end slightly worse,
   so the copy stays.
+- **libsais's inverse BWT.** `libsais_unbwt_aux` measured 99 MB/s against 72 for
+  this project's kernel on the same 8 MiB block with the same sample rows
+  (+37 %), but wiring it in moved the end-to-end decode by less than 2 % — the
+  inverse BWT is a fifth of decode — and `tests/test_payload.c` crashed inside
+  it on mutated streams: it trusts that the BWT and the sample rows form a valid
+  transform, and this project's kernel does not. It stays out. A v5 could take
+  it only with the guard pages always on for the library, which changes the API
+  contract.
 - **AVX2 encoder.** The same trick applied to the encoder gives 41 -> 44 MB/s on
   that stage, about 1.7 % of compression overall, with a second renamed object
   and a second byte-identity argument. Not worth it today; the encoder is

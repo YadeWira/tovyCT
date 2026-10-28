@@ -73,13 +73,12 @@ case "$TARGET" in
     ;;
 esac
 
-# FPC is a Windows program when the target is win-native, so the paths given to
-# it must be in Windows form; the C compiler and ar understand the POSIX ones.
-ROOT=$(pwd)
 FPC_TARGET=""
 if [ "$TARGET" = win-native ]; then
-  ROOT=$(cygpath -m "$(pwd)" 2>/dev/null || pwd)
   FPC_TARGET="-Twin64 -Px86_64"
+  # Git Bash rewrites arguments that look like POSIX paths before handing them
+  # to native programs; FPC must see the -Fl paths exactly as written.
+  export MSYS2_ARG_CONV_EXCL='*'
 fi
 
 if [ "$DEBUG" = 1 ]; then
@@ -100,10 +99,12 @@ for d in $WINLIB; do
 done
 
 if [ "$TARGET" = win-native ]; then
-  STDCXX_DIR=$(dirname "$(cc -print-file-name=libstdc++.a)")
-  if [ -d "$STDCXX_DIR" ] && [ "$STDCXX_DIR" != "." ]; then
-    LIBS="$LIBS -Fl$(cygpath -m "$STDCXX_DIR" 2>/dev/null || echo "$STDCXX_DIR")"
-  fi
+  for lib in libstdc++.a libgcc.a; do
+    dir=$(dirname "$(cc -print-file-name=$lib)")
+    if [ -d "$dir" ] && [ "$dir" != "." ]; then
+      LIBS="$LIBS -Fl$(cygpath -m "$dir" 2>/dev/null || echo "$dir")"
+    fi
+  done
 fi
 mkdir -p "$OUT/tests" "$OUT/lib" "$OUT/bsc" "$OUT/libsais" "$OUT/units"
 
@@ -111,10 +112,10 @@ mkdir -p "$OUT/tests" "$OUT/lib" "$OUT/bsc" "$OUT/libsais" "$OUT/units"
 $CC $CFLAGS -c src/c/tvct_kernels.c -o "$OUT/lib/tvct_kernels.o"
 $CC $CFLAGS -c src/c/tvct_text.c -o "$OUT/lib/tvct_text.o"
 $AR rcs "$OUT/lib/libtvctkern.a" "$OUT/lib/tvct_kernels.o" "$OUT/lib/tvct_text.o"
-LIBS="$LIBS -Fl$ROOT/$OUT/lib"
+LIBS="$LIBS -Fl$OUT/lib"
 
 # libbsc coder (C++), the entropy backend.
-BSC="$ROOT/third_party/libbsc/src"
+BSC="third_party/libbsc/src"
 $CXX $CFLAGS -c "$BSC/coder/coder.cpp" -o "$OUT/bsc/coder.o"
 $CXX $CFLAGS -c "$BSC/coder/qlfc/qlfc.cpp" -o "$OUT/bsc/qlfc.o"
 $CXX $CFLAGS -c "$BSC/coder/qlfc/qlfc_model.cpp" -o "$OUT/bsc/qlfc_model.o"
@@ -122,13 +123,13 @@ $CXX $CFLAGS -c "$BSC/platform/platform.cpp" -o "$OUT/bsc/platform.o"
 $CXX $CFLAGS -c "$BSC/adler32/adler32.cpp" -o "$OUT/bsc/adler32.o"
 $AR rcs "$OUT/bsc/libbsc.a" "$OUT/bsc/coder.o" "$OUT/bsc/qlfc.o" \
     "$OUT/bsc/qlfc_model.o" "$OUT/bsc/platform.o" "$OUT/bsc/adler32.o"
-LIBS="$LIBS -Fl$ROOT/$OUT/bsc"
+LIBS="$LIBS -Fl$OUT/bsc"
 
 if [ "$USE_LIBSAIS" = 1 ]; then
   $CC $CFLAGS -c third_party/libsais/libsais.c -o "$OUT/libsais/libsais.o"
   $AR rcs "$OUT/libsais/libsais.a" "$OUT/libsais/libsais.o"
   DEFS="-dTVCT_LIBSAIS"
-  LIBS="$LIBS -Fl$ROOT/$OUT/libsais"
+  LIBS="$LIBS -Fl$OUT/libsais"
   echo "libsais: $OUT/libsais/libsais.a"
 else
   echo "warning: no libsais; the suffix array falls back to the Pascal SA-IS" >&2
@@ -136,20 +137,20 @@ fi
 
 for t in tests/test_sais.lpr tests/test_bwt.lpr tests/test_codec.lpr; do
   echo "== $t"
-  $FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fi"$ROOT/src" -Futhird_party/pjablake3 -Fi"$ROOT/third_party/pjablake3" $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
+  $FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fisrc -Futhird_party/pjablake3 -Fithird_party/pjablake3 $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
       -FE"$OUT/tests" "$t"
 done
 
 echo "== third_party/pjablake3/tests/test_blake3.pas"
-$FPC -O2 $FPC_TARGET -Futhird_party/pjablake3 -Fi"$ROOT/third_party/pjablake3" -Fu"$OUT/tests" -FU"$OUT/tests" \
+$FPC -O2 $FPC_TARGET -Futhird_party/pjablake3 -Fithird_party/pjablake3 -Fu"$OUT/tests" -FU"$OUT/tests" \
     -FE"$OUT/tests" third_party/pjablake3/tests/test_blake3.pas
 
 echo "== tvct"
-$FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fi"$ROOT/src" -Futhird_party/pjablake3 -Fi"$ROOT/third_party/pjablake3" $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
+$FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fisrc -Futhird_party/pjablake3 -Fithird_party/pjablake3 $LIBS -Fu"$OUT/tests" -FU"$OUT/tests" \
     -FE"$OUT" src/tvct.lpr
 
 echo "== $SO"
-$FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fi"$ROOT/src" -Futhird_party/pjablake3 -Fi"$ROOT/third_party/pjablake3" $LIBS -Fu"$OUT/units" -FU"$OUT/units" \
+$FPC $FPCOPT $MODE $FPC_TARGET -Mobjfpc $DEFS -Fusrc -Fisrc -Futhird_party/pjablake3 -Fithird_party/pjablake3 $LIBS -Fu"$OUT/units" -FU"$OUT/units" \
     -o"$OUT/$SO" src/tvct.api.lpr
 cp include/tvct.h "$OUT/tvct.h"
 

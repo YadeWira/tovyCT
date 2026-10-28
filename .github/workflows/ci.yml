@@ -75,7 +75,9 @@ jobs:
             Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
       - name: FPC banner
         shell: bash
-        run: fpc -iV
+        run: |
+          fpc -iV
+          fpc -iTP -iTO 2>&1 || true
       - name: Build
         shell: bash
         run: ./scripts/build.sh --libsais --portable --target win-native

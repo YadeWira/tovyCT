@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 — 2026-10-28
 
 - `tvct --version` (and `-V`) prints the release version; the CLI and
   `tvct_version()` in the C API now read one constant in `src/tvct.version.pas`.

@@ -12,7 +12,7 @@ unit tvct.version;
 interface
 
 const
-  TVCT_VERSION = '0.2.1';
+  TVCT_VERSION = '0.2.2';
   TVCT_VERSION_DETAIL = 'tovyCT ' + TVCT_VERSION + ' (format v4)';
 
 implementation

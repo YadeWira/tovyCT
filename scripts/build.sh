@@ -65,7 +65,8 @@ case "$TARGET" in
     CFLAGS="-O3 -mcpu=cortex-a53"; EXE=""; SO="libtvct.so"; OUT=build/linux-arm64
     ;;
   win-native32)
-    CC=${CC:-cc}; CXX=${CXX:-c++}; AR=${AR:-ar}
+    CC=${CC:-i686-w64-mingw32-gcc}; CXX=${CXX:-i686-w64-mingw32-g++}
+    AR=${AR:-i686-w64-mingw32-ar}
     FPC=${FPC:-fpc}
     CFLAGS="-O3 -DTVCT_PORTABLE"; EXE=".exe"; SO="tvct.dll"; OUT=build/win-native32
     ;;
@@ -122,7 +123,7 @@ if [ "$TARGET" = win-native ] || [ "$TARGET" = win-native32 ]; then
   for lib in libkernel32.a libadvapi32.a libuser32.a libgdi32.a libshell32.a \
              libole32.a liboleaut32.a libuuid.a libws2_32.a libmsvcrt.a \
              libmingwex.a libgcc.a libstdc++.a; do
-    src=$(cc -print-file-name=$lib)
+    src=$($CC -print-file-name=$lib)
     if [ -f "$src" ]; then cp "$src" "$OUT/lib/"; fi
   done
 fi

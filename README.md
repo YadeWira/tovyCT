@@ -38,7 +38,7 @@ error instead of a crash. `--no-guard` turns that off.
 | Linux | AArch64 | built and tested in CI; output byte-identical to x86-64 |
 | Linux | x86 (32-bit) | built and tested in CI; output byte-identical to x86-64 |
 | Windows (7 and later) | x86-64 | built and tested in CI; also validated in a Windows 10 VM |
-| Windows (7 and later) | x86 | built and tested in CI; also validated in a Windows 7 VM |
+| Windows (7 and later) | x86 | built and tested in CI; also validated in a Windows 7 VM and on Windows XP SP3 |
 | macOS | AArch64 | built and tested in GitHub Actions |
 
 macOS x86-64 is not built (discarded by decision); ARMv7 was dropped.

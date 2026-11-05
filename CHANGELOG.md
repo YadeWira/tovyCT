@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **`tvct_compress3`**: the C API can produce v5 streams now. It is
+  `tvct_compress2` plus a `segments` argument (2..8; out-of-range values are
+  clamped), and `tvct_compress2` keeps the v4 layout. `tvct_set_guard` was
+  declared in the header but missing from the library's export list, so
+  embedders could not link it; it is exported now.
+
 ## 1.1.0 — 2026-10-28
 
 Faster on both sides with the compressed bytes unchanged, plus an optional

@@ -60,6 +60,16 @@ int64_t tvct_compress2(const void *src, size_t src_size,
                        int threads, int block_log, int coder, int no_samples,
                        int text, int digest);
 
+/* Everything tvct_compress2 does, plus the segmented entropy payload (format
+ * v5). segments 2..8 splits each block's BWT output into that many
+ * independently coded QLFC streams, which decompression can run on several
+ * threads; 1 keeps the plain v4 layout. Costs about 0.03 points of ratio with
+ * two streams and 0.10 with eight. Out-of-range values are clamped. */
+int64_t tvct_compress3(const void *src, size_t src_size,
+                       void *dst, size_t dst_cap,
+                       int threads, int block_log, int coder, int no_samples,
+                       int text, int digest, int segments);
+
 /* Decompresses a stream into dst. threads as above. Returns the number of
  * bytes written, or -1 on a corrupt stream or if dst_cap is too small. */
 int64_t tvct_decompress(const void *src, size_t src_size,

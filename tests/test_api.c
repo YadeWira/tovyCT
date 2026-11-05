@@ -63,6 +63,47 @@ static int64_t roundtrip(const unsigned char *src, long n, unsigned char *dst,
     return c;
 }
 
+/* tvct_compress3 adds the segmented payload. A segmented block is only
+   produced when the BWT is big enough to split (2 x 256 KiB), so the caller
+   passes a buffer that large; the version byte must say 5 then, and the
+   stream must round-trip with one thread and with several. */
+static int64_t roundtrip3(const unsigned char *src, long n, unsigned char *dst,
+                          size_t cap, int segments, int threads, int want_v5,
+                          const char *label)
+{
+    unsigned char *out = malloc((size_t)n);
+    int64_t c, size, d;
+
+    c = tvct_compress3(src, (size_t)n, dst, cap, threads, 0, 1, 0, 1, 0,
+                       segments);
+    if (c <= 0 || (size_t)c > cap)
+    {
+        fprintf(stderr, "FAIL: %s: compress3 returned %lld\n", label,
+                (long long)c);
+        failures++;
+        free(out);
+        return -1;
+    }
+    size = tvct_get_size(dst, (size_t)c);
+    if (size != n)
+    {
+        fprintf(stderr, "FAIL: %s: get_size %lld, expected %ld\n", label,
+                (long long)size, n);
+        failures++;
+    }
+    check(((const unsigned char *)dst)[4] == (want_v5 ? 5 : 4),
+          want_v5 ? "segmented stream says v5" : "plain stream says v4");
+    d = tvct_decompress(dst, (size_t)c, out, (size_t)n, threads);
+    if (d != n || memcmp(src, out, (size_t)n) != 0)
+    {
+        fprintf(stderr, "FAIL: %s: round trip returned %lld\n", label,
+                (long long)d);
+        failures++;
+    }
+    free(out);
+    return c;
+}
+
 int main(int argc, char **argv)
 {
     FILE *f;
@@ -116,6 +157,28 @@ int main(int argc, char **argv)
     roundtrip(src, n, dst, cap, 1, 1, 1, 0, "static, no samples", NULL, NULL);
     roundtrip(src, n, dst, cap, 2, 1, 1, 1, "adaptive, no samples, digest",
               NULL, NULL);
+
+    /* Segmented payload (format v5). The sample is too small to split, so a
+       1 MiB buffer is built from it; two streams need 256 KiB per stream. */
+    {
+        const long big_n = 1024 * 1024;
+        unsigned char *big = malloc((size_t)big_n);
+        if (big)
+        {
+            long i;
+            for (i = 0; i < big_n; i++)
+                big[i] = src[i % n];
+            roundtrip3(src, n, dst, cap, 1, 0, 0, "api v4, no segments");
+            roundtrip3(big, big_n, dst, cap, 2, 1, 1, "api v5, 2 streams, 1 thread");
+            roundtrip3(big, big_n, dst, cap, 2, 4, 1, "api v5, 2 streams, 4 threads");
+            roundtrip3(big, big_n, dst, cap, 4, 4, 1, "api v5, 4 streams");
+            roundtrip3(big, big_n, dst, cap, 99, 4, 1, "api v5, clamped segments");
+            free(big);
+        }
+    }
+
+    /* tvct_set_guard is exported and reversible. */
+    check(tvct_set_guard(0) >= 0, "tvct_set_guard returns the previous state");
 
     /* Invalid options must fail before writing anything. */
     check(tvct_compress2(src, (size_t)n, dst, cap, 0, 0, 1, 0, 3, 0) < 0,

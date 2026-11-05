@@ -136,9 +136,9 @@ begin
   end;
 end;
 
-function tvct_compress2(src: PByte; src_size: SizeInt; dst: PByte;
-  dst_cap: SizeInt; threads, block_log, coder, no_samples, text,
-  digest: Int32): Int64; cdecl;
+function tvct_compress3(src: PByte; src_size: SizeInt; dst: PByte;
+  dst_cap: SizeInt; threads, block_log, coder, no_samples, text, digest,
+  segments: Int32): Int64; cdecl;
 var
   InS, OutS: TBufferStream;
   St: TCodecStats;
@@ -160,6 +160,11 @@ begin
     Opts.UseSamples := no_samples = 0;
     Opts.Text := text;
     Opts.Digest := digest <> 0;
+    Opts.Segments := segments;
+    if Opts.Segments < 1 then
+      Opts.Segments := 1;
+    if Opts.Segments > MAX_SEGMENTS then
+      Opts.Segments := MAX_SEGMENTS;
     try
       if not CompressStream(InS, OutS, Opts, threads, St) then
         Exit;
@@ -176,15 +181,23 @@ end;
 function tvct_compress_ex(src: PByte; src_size: SizeInt; dst: PByte;
   dst_cap: SizeInt; threads, block_log, coder, no_samples: Int32): Int64; cdecl;
 begin
-  Result := tvct_compress2(src, src_size, dst, dst_cap, threads, block_log,
-                           coder, no_samples, TEXT_AUTO, 0);
+  Result := tvct_compress3(src, src_size, dst, dst_cap, threads, block_log,
+                           coder, no_samples, TEXT_AUTO, 0, 1);
+end;
+
+function tvct_compress2(src: PByte; src_size: SizeInt; dst: PByte;
+  dst_cap: SizeInt; threads, block_log, coder, no_samples, text,
+  digest: Int32): Int64; cdecl;
+begin
+  Result := tvct_compress3(src, src_size, dst, dst_cap, threads, block_log,
+                           coder, no_samples, text, digest, 1);
 end;
 
 function tvct_compress(src: PByte; src_size: SizeInt; dst: PByte;
   dst_cap: SizeInt; threads, block_log: Int32): Int64; cdecl;
 begin
-  Result := tvct_compress2(src, src_size, dst, dst_cap, threads, block_log,
-                           CODER_STATIC, 0, TEXT_AUTO, 0);
+  Result := tvct_compress3(src, src_size, dst, dst_cap, threads, block_log,
+                           CODER_STATIC, 0, TEXT_AUTO, 0, 1);
 end;
 
 function tvct_decompress(src: PByte; src_size: SizeInt; dst: PByte;
@@ -221,7 +234,9 @@ exports
   tvct_compress,
   tvct_compress_ex,
   tvct_compress2,
-  tvct_decompress;
+  tvct_compress3,
+  tvct_decompress,
+  tvct_set_guard;
 
 begin
 end.

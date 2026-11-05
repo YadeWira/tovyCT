@@ -30,3 +30,6 @@ fuzz-*.log
 
 # Fuzzer regression seeds are small and part of the test suite
 !tests/fixtures/*.bin
+
+# aim account credential (never commit)
+credenciales.md

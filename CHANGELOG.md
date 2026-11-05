@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Decoding uses the whole thread budget.** The batch now shares the remainder
+  of `-T` (three blocks on eight threads get 3/3/2 instead of 2/2/2) and, inside
+  a block, the segment workers pull the next stream from a shared index instead
+  of owning a fixed slice. With segmented streams this shows up end to end on
+  the 85 MiB corpus: 85.3 MB/s without segments, 110.7 with two (+30 %) and
+  114.2 with four (+34 %), for 0.04 and 0.06 points of ratio, at eight threads
+  instead of the sixteen the old per-block fan-out used.
 - **`tvct_compress3`**: the C API can produce v5 streams now. It is
   `tvct_compress2` plus a `segments` argument (2..8; out-of-range values are
   clamped), and `tvct_compress2` keeps the v4 layout. `tvct_set_guard` was

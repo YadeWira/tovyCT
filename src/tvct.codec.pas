@@ -580,11 +580,13 @@ type
 
   TSegThread = class(TThread)
   private
-    FCtx: ^TSegDecode;
+    FSeg: ^TSegDecode;
+    FCount: Int32;
+    FNext: PInt32;
   protected
     procedure Execute; override;
   public
-    constructor Create(ACtx: Pointer);
+    constructor Create(ASeg: Pointer; ACount: Int32; ANext: PInt32);
   end;
 
   TGuardDecode = record
@@ -645,17 +647,29 @@ begin
   GuardTail(Ctx);
 end;
 
-constructor TSegThread.Create(ACtx: Pointer);
+constructor TSegThread.Create(ASeg: Pointer; ACount: Int32; ANext: PInt32);
 begin
-  FCtx := ACtx;
+  FSeg := ASeg;
+  FCount := ACount;
+  FNext := ANext;
   FreeOnTerminate := False;
   inherited Create(False);
 end;
 
+{ Segments are independent, so the workers pull the next one from a shared
+  index instead of owning a fixed slice: with four segments and three threads
+  one worker takes two and no thread sits idle. }
 procedure TSegThread.Execute;
+var
+  Index: Int32;
 begin
-  if GuardRun(@GuardEntropyOne, FCtx) <> 0 then
-    FCtx^.Ok := False;
+  repeat
+    Index := InterlockedIncrement(FNext^) - 1;
+    if Index >= FCount then
+      Break;
+    if GuardRun(@GuardEntropyOne, FSeg + Index) <> 0 then
+      FSeg[Index].Ok := False;
+  until False;
 end;
 
 { Decodes the body in Job.Blk into Job.Data (Job.N bytes). Everything that
@@ -669,6 +683,7 @@ end;
 function DecodeBlock(var Job: TBlockJob): Boolean;
 var
   Pos, T, Primary, NSamples, i, PayLen, K, Total, Off, Len, SegOff: Int32;
+  Workers, Next: Int32;
   V: QWord;
   Ctx: TGuardDecode;
   Seg: array[0..MAX_SEGMENTS - 1] of TSegDecode;
@@ -797,13 +812,24 @@ begin
       Seg[i].Ok := False;
       Inc(SegOff, SegLen[i]);
     end;
-    if (Job.Threads > 1) and (K <= Job.Threads) then
+    if (Job.Threads > 1) and (K > 1) then
     begin
-      for i := 0 to K - 2 do
-        Th[i] := TSegThread.Create(@Seg[i]);
-      if GuardRun(@GuardEntropyOne, @Seg[K - 1]) <> 0 then
-        Seg[K - 1].Ok := False;
-      for i := 0 to K - 2 do
+      { Up to Job.Threads workers, each pulling segments until they run out;
+        this thread is one of them. }
+      Workers := K;
+      if Workers > Job.Threads then
+        Workers := Job.Threads;
+      Next := 0;
+      for i := 0 to Workers - 2 do
+        Th[i] := TSegThread.Create(@Seg[0], K, @Next);
+      repeat
+        i := InterlockedIncrement(Next) - 1;
+        if i >= K then
+          Break;
+        if GuardRun(@GuardEntropyOne, @Seg[i]) <> 0 then
+          Seg[i].Ok := False;
+      until False;
+      for i := 0 to Workers - 2 do
       begin
         Th[i].WaitFor;
         Th[i].Free;
@@ -1131,9 +1157,13 @@ begin
       { A block may use as many threads as there are spare ones: if the batch
         fills the pool, the segments decode one after another and the entropy
         stage still gets its bytes. }
+      { The batch gets the whole budget, remainder included: three blocks on
+        eight threads get 3, 3 and 2, not two each with two idle. }
       for i := 0 to Count - 1 do
       begin
         Jobs[i].Threads := Threads div Count;
+        if i < (Threads mod Count) then
+          Inc(Jobs[i].Threads);
         if Jobs[i].Threads < 1 then
           Jobs[i].Threads := 1;
       end;
